@@ -40,7 +40,7 @@ export function Dialog({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="relative z-10 w-full max-w-lg rounded-slate border border-line bg-surface shadow-soft"
+        className="relative z-10 w-full max-w-lg rounded-xl border border-line bg-surface shadow-soft"
       >
         <header className="flex items-center justify-between border-b border-line px-5 py-4">
           <h2 className="text-base font-semibold">{title}</h2>

@@ -50,8 +50,8 @@ export function SettingsView({
   return (
     <div className="mx-auto max-w-3xl space-y-8">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
-        <p className="mt-1 text-sm text-muted">
+        <h1 className="page-title">Settings</h1>
+        <p className="page-subtitle">
           Servers, companies, wipeout template, account, and optional Proxmox.
         </p>
       </div>
@@ -308,8 +308,8 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-slate border border-line bg-surface p-5">
-      <h2 className="mb-3 text-sm font-semibold">{title}</h2>
+    <section className="rounded-xl border border-line bg-surface p-5">
+      <h2 className="mb-3 text-sm font-semibold tracking-tight">{title}</h2>
       {children}
     </section>
   );

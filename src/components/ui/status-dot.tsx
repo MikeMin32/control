@@ -1,19 +1,16 @@
-import { cn } from "@/lib/utils";
+import { StatusPill } from "./status-pill";
 
+/** @deprecated Prefer StatusPill — kept as thin wrapper for older call sites. */
 export function StatusDot({
   colorClass,
   label,
+  pillClass = "bg-sidebar text-ink",
 }: {
   colorClass: string;
   label: string;
+  pillClass?: string;
 }) {
   return (
-    <span className="inline-flex items-center gap-2 text-sm text-ink">
-      <span
-        className={cn("h-2 w-2 shrink-0 rounded-full", colorClass)}
-        aria-hidden
-      />
-      <span>{label}</span>
-    </span>
+    <StatusPill label={label} dotClass={colorClass} pillClass={pillClass} />
   );
 }

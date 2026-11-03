@@ -5,8 +5,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   Copy,
   MoreHorizontal,
+  Monitor,
   Plus,
+  RefreshCw,
   Search,
+  Server as ServerIcon,
 } from "lucide-react";
 import type {
   Company,
@@ -20,7 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
 import { Dialog } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
-import { StatusDot } from "@/components/ui/status-dot";
+import { StatusPill } from "@/components/ui/status-pill";
 import {
   createCompanyInlineAction,
   createMachineAction,
@@ -30,9 +33,15 @@ import {
   startClosureAction,
   updateMachineAction,
 } from "@/lib/actions";
-import { LIFECYCLE_DOT, LIFECYCLE_LABELS } from "@/lib/labels";
 import {
-  formatCalendarDate,
+  LIFECYCLE_DOT,
+  LIFECYCLE_LABELS,
+  LIFECYCLE_PILL,
+} from "@/lib/labels";
+import type { ProxmoxStatus } from "@/lib/proxmox";
+import {
+  cn,
+  formatCalendarDateLong,
   formatDate,
   isRenewalOverdue,
 } from "@/lib/utils";
@@ -81,6 +90,9 @@ export function MachinesView({
   initialServerId,
   initialQ,
   initialStatus,
+  serverCounts,
+  allCount,
+  proxmox,
 }: {
   machines: MachineRow[];
   total: number;
@@ -94,6 +106,9 @@ export function MachinesView({
   initialServerId: string;
   initialQ: string;
   initialStatus: string;
+  serverCounts: Record<string, number>;
+  allCount: number;
+  proxmox: ProxmoxStatus;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -103,11 +118,14 @@ export function MachinesView({
   const [tab, setTab] = useState<"overview" | "proxy" | "activity">("overview");
   const [rotateOpen, setRotateOpen] = useState(false);
   const [migrateOpen, setMigrateOpen] = useState(false);
+  const [rowMenu, setRowMenu] = useState<string | null>(null);
 
   const activeServers = useMemo(
     () => servers.filter((s) => !s.retiredAt),
     [servers],
   );
+
+  const selectedServer = activeServers.find((s) => s.id === initialServerId);
 
   function setQuery(patch: Record<string, string | null>) {
     const sp = new URLSearchParams(searchParams.toString());
@@ -141,34 +159,76 @@ export function MachinesView({
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Machines</h1>
-          <p className="mt-1 text-sm text-muted">
-            {total} result{total === 1 ? "" : "s"}
+          <h1 className="page-title">Machines</h1>
+          <p className="page-subtitle">
+            Manage Proxmox virtual machines across your servers.
           </p>
         </div>
-        <Button variant="primary" onClick={() => setAddOpen(true)}>
-          <Plus className="h-4 w-4" />
-          Add VM
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Refresh"
+            title="Refresh"
+            onClick={() => router.refresh()}
+          >
+            <RefreshCw className="h-4 w-4" strokeWidth={1.75} />
+          </Button>
+          <Button variant="primary" onClick={() => setAddOpen(true)}>
+            <Plus className="h-4 w-4" strokeWidth={2} />
+            Add VM
+          </Button>
+        </div>
       </div>
 
-      <div className="flex flex-wrap gap-1 border-b border-line pb-0">
-        <ServerTab
+      <div className="flex flex-wrap gap-2">
+        <ServerTabPill
           active={!initialServerId}
           onClick={() => setQuery({ serverId: null })}
           label="All servers"
+          count={allCount}
         />
         {activeServers.map((s) => (
-          <ServerTab
+          <ServerTabPill
             key={s.id}
             active={initialServerId === s.id}
             onClick={() => setQuery({ serverId: s.id })}
             label={s.name}
+            count={serverCounts[s.id] ?? 0}
           />
         ))}
       </div>
+
+      {selectedServer ? (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-line bg-surface px-4 py-3">
+          <div>
+            <div className="text-lg font-semibold tracking-tight text-ink">
+              {selectedServer.name}
+            </div>
+            <div className="text-sm text-muted">
+              {serverCounts[selectedServer.id] ?? 0} VMs
+              {proxmox.state !== "not_configured"
+                ? ` · Proxmox ${proxmox.state === "connected" ? "connected" : "unreachable"}`
+                : ""}
+            </div>
+          </div>
+          {proxmox.state === "connected" ? (
+            <StatusPill
+              label="Online"
+              dotClass="bg-[#2f9e5f]"
+              pillClass="bg-[#e5f5ea] text-[#1a4a2e]"
+            />
+          ) : proxmox.state === "unreachable" ? (
+            <StatusPill
+              label="Unreachable"
+              dotClass="bg-[#c45c5c]"
+              pillClass="bg-[#fce8e8] text-[#8a3030]"
+            />
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap gap-2">
         <div className="relative min-w-[220px] flex-1">
@@ -204,9 +264,9 @@ export function MachinesView({
         </Select>
       </div>
 
-      <div className="overflow-x-auto rounded-slate border border-line bg-surface">
+      <div className="overflow-x-auto rounded-xl border border-line bg-surface">
         <table className="min-w-full text-left text-sm">
-          <thead className="border-b border-line bg-sidebar/50 text-xs uppercase tracking-wide text-muted">
+          <thead className="table-head">
             <tr>
               <th className="px-4 py-3 font-medium">VM</th>
               <th className="px-4 py-3 font-medium">Company</th>
@@ -214,7 +274,7 @@ export function MachinesView({
                 <th className="px-4 py-3 font-medium">Server</th>
               ) : null}
               <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium">Current proxy</th>
+              <th className="px-4 py-3 font-medium">Proxy IP</th>
               <th className="px-4 py-3 font-medium">Renewal</th>
               <th className="px-4 py-3 font-medium" />
             </tr>
@@ -224,7 +284,7 @@ export function MachinesView({
               <tr>
                 <td
                   colSpan={7}
-                  className="px-4 py-12 text-center text-muted"
+                  className="px-4 py-14 text-center text-muted"
                 >
                   No machines match these filters.
                 </td>
@@ -236,30 +296,42 @@ export function MachinesView({
                 return (
                   <tr
                     key={m.id}
-                    className="cursor-pointer border-b border-line last:border-0 hover:bg-sidebar/40"
+                    className="cursor-pointer border-b border-line last:border-0 hover:bg-sidebar/50"
                     onClick={() => openMachine(m.id)}
                   >
-                    <td className="px-4 py-3">
-                      <div className="font-medium tabular-nums">{m.vmid}</div>
-                      {m.displayName ? (
-                        <div className="text-xs text-muted">{m.displayName}</div>
-                      ) : null}
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center gap-2.5">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-slate border border-line bg-sidebar text-muted">
+                          <Monitor className="h-4 w-4" strokeWidth={1.6} />
+                        </span>
+                        <div>
+                          <div className="font-semibold tabular-nums text-ink">
+                            {m.vmid}
+                          </div>
+                          {m.displayName ? (
+                            <div className="text-xs text-muted">
+                              {m.displayName}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
                     </td>
-                    <td className="px-4 py-3">{m.company.name}</td>
+                    <td className="px-4 py-3.5 text-ink">{m.company.name}</td>
                     {!initialServerId ? (
-                      <td className="px-4 py-3">{m.server.name}</td>
+                      <td className="px-4 py-3.5 text-ink">{m.server.name}</td>
                     ) : null}
-                    <td className="px-4 py-3">
-                      <StatusDot
-                        colorClass={LIFECYCLE_DOT[m.lifecycleStatus]}
+                    <td className="px-4 py-3.5">
+                      <StatusPill
                         label={LIFECYCLE_LABELS[m.lifecycleStatus]}
+                        dotClass={LIFECYCLE_DOT[m.lifecycleStatus]}
+                        pillClass={LIFECYCLE_PILL[m.lifecycleStatus]}
                       />
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3.5">
                       {current ? (
                         <button
                           type="button"
-                          className="inline-flex items-center gap-1 font-mono text-xs hover:underline"
+                          className="inline-flex items-center gap-1.5 font-mono text-[12px] text-ink hover:underline"
                           onClick={(e) => {
                             e.stopPropagation();
                             void copyText(current.ip);
@@ -272,11 +344,11 @@ export function MachinesView({
                         <span className="text-muted">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3.5">
                       {current?.renewalDate ? (
                         <span
                           className={
-                            overdue ? "text-orange-700" : undefined
+                            overdue ? "text-[#8a3030]" : "text-ink"
                           }
                           title={
                             overdue
@@ -284,15 +356,45 @@ export function MachinesView({
                               : undefined
                           }
                         >
-                          {formatCalendarDate(current.renewalDate)}
-                          {overdue ? " · overdue" : ""}
+                          {formatCalendarDateLong(current.renewalDate)}
+                          {overdue ? (
+                            <span className="ml-1 text-xs">· overdue</span>
+                          ) : null}
                         </span>
                       ) : (
                         "—"
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right">
-                      <MoreHorizontal className="ml-auto h-4 w-4 text-muted" />
+                    <td className="relative px-4 py-3.5 text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8"
+                        aria-label="Row actions"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRowMenu(rowMenu === m.id ? null : m.id);
+                        }}
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                      {rowMenu === m.id ? (
+                        <div
+                          className="absolute right-4 z-20 mt-1 w-40 overflow-hidden rounded-slate border border-line bg-surface text-left shadow-soft"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            className="block w-full px-3 py-2 text-sm hover:bg-sidebar"
+                            onClick={() => {
+                              setRowMenu(null);
+                              openMachine(m.id);
+                            }}
+                          >
+                            Open details
+                          </button>
+                        </div>
+                      ) : null}
                     </td>
                   </tr>
                 );
@@ -302,12 +404,17 @@ export function MachinesView({
         </table>
       </div>
 
-      <Pagination
-        page={page}
-        pageSize={pageSize}
-        total={total}
-        onPage={(p) => setQuery({ page: String(p) })}
-      />
+      <div className="flex items-center justify-between text-sm text-muted">
+        <span>
+          {total} result{total === 1 ? "" : "s"}
+        </span>
+        <Pagination
+          page={page}
+          pageSize={pageSize}
+          total={total}
+          onPage={(p) => setQuery({ page: String(p) })}
+        />
+      </div>
 
       <Dialog
         open={addOpen}
@@ -378,7 +485,11 @@ export function MachinesView({
             </Field>
           </div>
           <Field label="Server">
-            <Select name="serverId" required defaultValue={initialServerId || activeServers[0]?.id}>
+            <Select
+              name="serverId"
+              required
+              defaultValue={initialServerId || activeServers[0]?.id}
+            >
               {activeServers.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -511,10 +622,7 @@ export function MachinesView({
             ) : null}
 
             {tab === "activity" ? (
-              <ActivityList
-                items={selected.activities}
-                timezone={timezone}
-              />
+              <ActivityList items={selected.activities} timezone={timezone} />
             ) : null}
 
             <Dialog
@@ -579,7 +687,11 @@ export function MachinesView({
                   </Select>
                 </Field>
                 <Field label="Reason">
-                  <Input name="reason" required placeholder="Replacement reason" />
+                  <Input
+                    name="reason"
+                    required
+                    placeholder="Replacement reason"
+                  />
                 </Field>
               </form>
             </Dialog>
@@ -625,7 +737,11 @@ export function MachinesView({
                 }}
               >
                 <Field label="Target server">
-                  <Select name="toServerId" required defaultValue={selected.serverId}>
+                  <Select
+                    name="toServerId"
+                    required
+                    defaultValue={selected.serverId}
+                  >
                     {activeServers.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.name}
@@ -634,7 +750,13 @@ export function MachinesView({
                   </Select>
                 </Field>
                 <Field label="Target VMID">
-                  <Input name="toVmid" type="number" required min={1} defaultValue={selected.vmid} />
+                  <Input
+                    name="toVmid"
+                    type="number"
+                    required
+                    min={1}
+                    defaultValue={selected.vmid}
+                  />
                 </Field>
                 <Field label="Note">
                   <Input name="note" />
@@ -648,12 +770,14 @@ export function MachinesView({
   );
 }
 
-function ServerTab({
+function ServerTabPill({
   label,
+  count,
   active,
   onClick,
 }: {
   label: string;
+  count: number;
   active: boolean;
   onClick: () => void;
 }) {
@@ -661,13 +785,23 @@ function ServerTab({
     <button
       type="button"
       onClick={onClick}
-      className={`-mb-px border-b-2 px-3 py-2 text-sm ${
+      className={cn(
+        "inline-flex items-center gap-2 rounded-slate border px-3 py-2 text-sm transition",
         active
-          ? "border-ink font-medium text-ink"
-          : "border-transparent text-muted hover:text-ink"
-      }`}
+          ? "border-transparent bg-sidebar-active font-medium text-ink"
+          : "border-line bg-surface text-muted hover:bg-sidebar/80 hover:text-ink",
+      )}
     >
-      {label}
+      <ServerIcon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />
+      <span>{label}</span>
+      <span
+        className={cn(
+          "inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1.5 text-[11px] font-medium",
+          active ? "bg-surface text-ink" : "bg-sidebar text-muted",
+        )}
+      >
+        {count}
+      </span>
     </button>
   );
 }
@@ -771,8 +905,12 @@ function Overview({
           <div className="font-mono text-xs">{current?.ip || "—"}</div>
         </div>
         <div>
-          <div className="text-xs text-muted">Proxmox power</div>
-          <div>Unknown</div>
+          <div className="text-xs text-muted">Status</div>
+          <StatusPill
+            label={LIFECYCLE_LABELS[machine.lifecycleStatus]}
+            dotClass={LIFECYCLE_DOT[machine.lifecycleStatus]}
+            pillClass={LIFECYCLE_PILL[machine.lifecycleStatus]}
+          />
         </div>
       </div>
       <Field label="Display name">
@@ -859,8 +997,8 @@ function ProxyHistory({
             {a.endedAt ? "" : " · current"}
           </div>
           <div className="mt-1 text-xs text-muted">
-            {formatCalendarDate(a.startedAt)} →{" "}
-            {a.endedAt ? formatCalendarDate(a.endedAt) : "present"}
+            {formatCalendarDateLong(a.startedAt)} →{" "}
+            {a.endedAt ? formatCalendarDateLong(a.endedAt) : "present"}
             {a.reason ? ` · ${a.reason}` : ""}
           </div>
         </li>
@@ -882,7 +1020,10 @@ function ActivityList({
   return (
     <ul className="space-y-3">
       {items.map((a) => (
-        <li key={a.id} className="border-b border-line pb-3 text-sm last:border-0">
+        <li
+          key={a.id}
+          className="border-b border-line pb-3 text-sm last:border-0"
+        >
           <div>{a.message}</div>
           <div className="mt-1 text-xs text-muted">
             {formatDate(a.createdAt, timezone)}

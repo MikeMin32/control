@@ -56,8 +56,8 @@ export function ArchiveView({
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Archive</h1>
-        <p className="mt-1 text-sm text-muted">
+        <h1 className="page-title">Archive</h1>
+        <p className="page-subtitle">
           Read-only closed records with full history preserved.
         </p>
       </div>
@@ -75,9 +75,9 @@ export function ArchiveView({
         }}
       />
 
-      <div className="overflow-x-auto rounded-slate border border-line bg-surface">
+      <div className="overflow-x-auto rounded-xl border border-line bg-surface">
         <table className="min-w-full text-left text-sm">
-          <thead className="border-b border-line bg-sidebar/50 text-xs uppercase tracking-wide text-muted">
+          <thead className="table-head">
             <tr>
               <th className="px-4 py-3 font-medium">VM</th>
               <th className="px-4 py-3 font-medium">Company</th>

@@ -35,6 +35,31 @@ export function formatCalendarDate(
   return `${y}-${m}-${d}`;
 }
 
+/** Display calendar date as "Mar 15, 2026" without TZ shift. */
+export function formatCalendarDateLong(
+  value: Date | string | null | undefined,
+): string {
+  if (!value) return "—";
+  const iso = formatCalendarDate(value);
+  if (iso === "—") return iso;
+  const [y, m, d] = iso.split("-").map(Number);
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  return `${months[m - 1]} ${d}, ${y}`;
+}
+
 export function isRenewalOverdue(
   renewalDate: Date | string | null | undefined,
 ): boolean {

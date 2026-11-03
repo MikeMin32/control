@@ -9,18 +9,19 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        canvas: "#f7f7f5",
+        canvas: "#f6f7f6",
         surface: "#ffffff",
-        sidebar: "#eef0ee",
-        "sidebar-active": "#e3e7e4",
-        ink: "#1a1c1a",
-        muted: "#6b716c",
-        line: "#e2e4e1",
-        "line-strong": "#d0d4d0",
+        sidebar: "#f0f1f0",
+        "sidebar-active": "#e4e6e4",
+        ink: "#151715",
+        muted: "#6a706b",
+        line: "#e6e8e6",
+        "line-strong": "#d5d8d5",
         mint: {
-          DEFAULT: "#c8e6d0",
-          strong: "#9fd0ad",
-          text: "#1f4d32",
+          DEFAULT: "#cfead6",
+          strong: "#b5dcc0",
+          text: "#1a4a2e",
+          soft: "#e5f5ea",
         },
       },
       fontFamily: {
@@ -34,10 +35,11 @@ const config: Config = {
         mono: ["IBM Plex Mono", "ui-monospace", "monospace"],
       },
       boxShadow: {
-        soft: "0 1px 2px rgba(26, 28, 26, 0.04)",
+        soft: "0 1px 2px rgba(21, 23, 21, 0.04)",
       },
       borderRadius: {
         slate: "8px",
+        pill: "999px",
       },
     },
   },

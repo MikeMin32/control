@@ -1,8 +1,14 @@
 import { Suspense } from "react";
 import { MachinesView } from "@/components/machines/machines-view";
 import { listMachines, getMachine } from "@/lib/services/machines";
-import { listServers, listCompanies, getOrCreateSettings } from "@/lib/services/settings";
+import {
+  listServers,
+  listCompanies,
+  getOrCreateSettings,
+} from "@/lib/services/settings";
 import { listProxies } from "@/lib/services/proxies";
+import { prisma } from "@/lib/db";
+import { getProxmoxStatusSync } from "@/lib/proxmox";
 import type { LifecycleStatus } from "@prisma/client";
 
 export default async function MachinesPage({
@@ -17,7 +23,7 @@ export default async function MachinesPage({
   const page = Number(sp.page || 1);
   const id = sp.id;
 
-  const [list, servers, companies, availableProxies, settings] =
+  const [list, servers, companies, availableProxies, settings, grouped] =
     await Promise.all([
       listMachines({
         serverId,
@@ -30,7 +36,19 @@ export default async function MachinesPage({
       listCompanies(),
       listProxies({ availability: "AVAILABLE" }),
       getOrCreateSettings(),
+      prisma.machine.groupBy({
+        by: ["serverId"],
+        where: { archivedAt: null },
+        _count: { _all: true },
+      }),
     ]);
+
+  const serverCounts: Record<string, number> = {};
+  let allCount = 0;
+  for (const g of grouped) {
+    serverCounts[g.serverId] = g._count._all;
+    allCount += g._count._all;
+  }
 
   let selected = null;
   if (id) {
@@ -56,6 +74,9 @@ export default async function MachinesPage({
         initialServerId={serverId || ""}
         initialQ={q}
         initialStatus={status || ""}
+        serverCounts={serverCounts}
+        allCount={allCount}
+        proxmox={getProxmoxStatusSync()}
       />
     </Suspense>
   );

@@ -6,20 +6,20 @@ type Size = "sm" | "md" | "icon";
 
 const variants: Record<Variant, string> = {
   primary:
-    "bg-mint text-mint-text hover:bg-mint-strong border border-transparent",
+    "bg-mint text-mint-text hover:bg-mint-strong border border-transparent shadow-soft",
   secondary:
     "bg-surface text-ink border border-line-strong hover:bg-sidebar",
   ghost: "bg-transparent text-ink hover:bg-sidebar border border-transparent",
   danger:
-    "bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100",
+    "bg-[#fce8e8] text-[#8a3030] border border-[#f0d0d0] hover:bg-[#f8dede]",
   outline:
-    "bg-transparent text-ink border border-line-strong hover:bg-sidebar",
+    "bg-surface text-ink border border-line-strong hover:bg-sidebar",
 };
 
 const sizes: Record<Size, string> = {
   sm: "h-8 px-3 text-sm",
   md: "h-9 px-3.5 text-sm",
-  icon: "h-8 w-8 p-0",
+  icon: "h-9 w-9 p-0",
 };
 
 export const Button = React.forwardRef<

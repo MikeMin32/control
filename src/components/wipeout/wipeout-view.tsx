@@ -70,16 +70,16 @@ export function WipeoutView({
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight">Wipeout</h1>
-        <p className="mt-1 text-sm text-muted">
+        <h1 className="page-title">Wipeout</h1>
+        <p className="page-subtitle">
           Manual closure checklists. Completing an item records attestation —
           it does not delete external resources.
         </p>
       </div>
 
-      <div className="overflow-x-auto rounded-slate border border-line bg-surface">
+      <div className="overflow-x-auto rounded-xl border border-line bg-surface">
         <table className="min-w-full text-left text-sm">
-          <thead className="border-b border-line bg-sidebar/50 text-xs uppercase tracking-wide text-muted">
+          <thead className="table-head">
             <tr>
               <th className="px-4 py-3 font-medium">VM</th>
               <th className="px-4 py-3 font-medium">Company</th>

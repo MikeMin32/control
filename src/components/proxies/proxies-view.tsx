@@ -7,14 +7,19 @@ import type { Proxy, ProxyAssignment, Machine, Server, Company } from "@prisma/c
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
-import { StatusDot } from "@/components/ui/status-dot";
+import { StatusPill } from "@/components/ui/status-pill";
 import {
   createProxyAction,
   retireProxyAction,
   updateProxyBillingAction,
 } from "@/lib/actions";
-import { AVAILABILITY_LABELS, BILLING_LABELS } from "@/lib/labels";
-import { formatCalendarDate } from "@/lib/utils";
+import {
+  AVAILABILITY_DOT,
+  AVAILABILITY_LABELS,
+  AVAILABILITY_PILL,
+  BILLING_LABELS,
+} from "@/lib/labels";
+import { cn, formatCalendarDateLong } from "@/lib/utils";
 
 type Row = Proxy & {
   assignments: (ProxyAssignment & {
@@ -42,10 +47,10 @@ export function ProxiesView({
 
   return (
     <div className="space-y-5">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Proxies</h1>
-          <p className="mt-1 text-sm text-muted">
+          <h1 className="page-title">Proxies</h1>
+          <p className="page-subtitle">
             Inventory of proxy IPs. Rotate records history only — billing is
             independent.
           </p>
@@ -57,23 +62,24 @@ export function ProxiesView({
       </div>
 
       {pendingCancellations.length > 0 ? (
-        <div className="rounded-slate border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-900">
+        <div className="rounded-xl border border-[#f0d0d0] bg-[#fce8e8] px-4 py-3 text-sm text-[#8a3030]">
           {pendingCancellations.length} proxy
           {pendingCancellations.length === 1 ? "" : "ies"} with unresolved
           cancellation work.
         </div>
       ) : null}
 
-      <div className="flex gap-1 border-b border-line">
+      <div className="flex flex-wrap gap-2">
         {["ALL", "AVAILABLE", "ASSIGNED", "RETIRED"].map((f) => (
           <button
             key={f}
             type="button"
-            className={`-mb-px border-b-2 px-3 py-2 text-sm ${
+            className={cn(
+              "rounded-slate border px-3 py-2 text-sm transition",
               filter === f
-                ? "border-ink font-medium"
-                : "border-transparent text-muted"
-            }`}
+                ? "border-transparent bg-sidebar-active font-medium text-ink"
+                : "border-line bg-surface text-muted hover:bg-sidebar/80",
+            )}
             onClick={() => setFilter(f)}
           >
             {f === "ALL"
@@ -83,9 +89,9 @@ export function ProxiesView({
         ))}
       </div>
 
-      <div className="overflow-x-auto rounded-slate border border-line bg-surface">
+      <div className="overflow-x-auto rounded-xl border border-line bg-surface">
         <table className="min-w-full text-left text-sm">
-          <thead className="border-b border-line bg-sidebar/50 text-xs uppercase tracking-wide text-muted">
+          <thead className="table-head">
             <tr>
               <th className="px-4 py-3 font-medium">IP</th>
               <th className="px-4 py-3 font-medium">Provider</th>
@@ -103,16 +109,11 @@ export function ProxiesView({
                 <tr key={p.id} className="border-b border-line last:border-0">
                   <td className="px-4 py-3 font-mono text-xs">{p.ip}</td>
                   <td className="px-4 py-3">{p.provider}</td>
-                  <td className="px-4 py-3">
-                    <StatusDot
-                      colorClass={
-                        p.availability === "AVAILABLE"
-                          ? "bg-emerald-500"
-                          : p.availability === "ASSIGNED"
-                            ? "bg-sky-500"
-                            : "bg-slate-400"
-                      }
+                  <td className="px-4 py-3.5">
+                    <StatusPill
                       label={AVAILABILITY_LABELS[p.availability]}
+                      dotClass={AVAILABILITY_DOT[p.availability]}
+                      pillClass={AVAILABILITY_PILL[p.availability]}
                     />
                   </td>
                   <td className="px-4 py-3">
@@ -141,8 +142,8 @@ export function ProxiesView({
                       ? `${a.machine.vmid} · ${a.machine.company.name}`
                       : "—"}
                   </td>
-                  <td className="px-4 py-3">
-                    {formatCalendarDate(p.renewalDate)}
+                  <td className="px-4 py-3.5">
+                    {formatCalendarDateLong(p.renewalDate)}
                   </td>
                   <td className="px-4 py-3 text-right">
                     {p.availability !== "RETIRED" &&

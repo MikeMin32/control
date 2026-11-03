@@ -14,6 +14,7 @@ import {
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { BrandMark } from "@/components/ui/brand-mark";
 
 const NAV = [
   { href: "/machines", label: "Machines", icon: Monitor },
@@ -23,12 +24,28 @@ const NAV = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
+function BrandBlock() {
+  return (
+    <div className="flex items-start gap-2.5 px-1">
+      <BrandMark className="mt-0.5" />
+      <div>
+        <div className="text-[13px] font-semibold uppercase tracking-[0.08em] text-ink">
+          VM Control
+        </div>
+        <div className="mt-0.5 text-[11px] leading-snug text-muted">
+          Proxmox VM Management
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
   const nav = (
-    <nav className="flex flex-1 flex-col gap-0.5 p-3">
+    <nav className="flex flex-1 flex-col gap-1 p-3 pt-2">
       {NAV.map((item) => {
         const active =
           pathname === item.href || pathname.startsWith(item.href + "/");
@@ -39,13 +56,13 @@ export function Sidebar() {
             href={item.href}
             onClick={() => setOpen(false)}
             className={cn(
-              "flex items-center gap-2.5 rounded-slate px-3 py-2 text-sm font-medium transition",
+              "flex items-center gap-2.5 rounded-slate px-3 py-2.5 text-[13.5px] font-medium transition",
               active
                 ? "bg-sidebar-active text-ink"
-                : "text-muted hover:bg-sidebar-active/60 hover:text-ink",
+                : "text-muted hover:bg-sidebar-active/70 hover:text-ink",
             )}
           >
-            <Icon className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+            <Icon className="h-[18px] w-[18px] shrink-0" strokeWidth={1.6} />
             {item.label}
           </Link>
         );
@@ -64,7 +81,7 @@ export function Sidebar() {
         >
           <Menu className="h-4 w-4" />
         </Button>
-        <span className="text-sm font-semibold tracking-tight">VM Control</span>
+        <BrandBlock />
       </div>
 
       {open ? (
@@ -75,9 +92,9 @@ export function Sidebar() {
             aria-label="Close navigation"
             onClick={() => setOpen(false)}
           />
-          <aside className="relative z-10 flex h-full w-64 flex-col bg-sidebar">
-            <div className="flex items-center justify-between px-4 py-4">
-              <span className="text-sm font-semibold">VM Control</span>
+          <aside className="relative z-10 flex h-full w-[232px] flex-col bg-sidebar">
+            <div className="flex items-start justify-between px-4 py-5">
+              <BrandBlock />
               <Button
                 variant="ghost"
                 size="icon"
@@ -92,12 +109,9 @@ export function Sidebar() {
         </div>
       ) : null}
 
-      <aside className="hidden w-56 shrink-0 flex-col border-r border-line bg-sidebar lg:flex">
-        <div className="px-5 py-5">
-          <div className="text-[15px] font-semibold tracking-tight text-ink">
-            VM Control
-          </div>
-          <div className="mt-0.5 text-xs text-muted">Inventory & lifecycle</div>
+      <aside className="hidden w-[232px] shrink-0 flex-col border-r border-line bg-sidebar lg:flex">
+        <div className="px-4 py-5">
+          <BrandBlock />
         </div>
         {nav}
       </aside>

@@ -17,6 +17,12 @@ const browser = await puppeteer.launch({
 });
 
 const page = await browser.newPage();
+page.setDefaultNavigationTimeout(60000);
+
+async function go(url) {
+  await page.goto(url, { waitUntil: "domcontentloaded" });
+  await new Promise((r) => setTimeout(r, 600));
+}
 
 async function shot(name) {
   const file = path.join(OUT, `${name}.png`);
@@ -24,28 +30,43 @@ async function shot(name) {
   console.log("wrote", file);
 }
 
-await page.goto(`${BASE}/login`, { waitUntil: "networkidle0" });
-await shot("01-login");
+await go(`${BASE}/login`);
+await shot("slate-01-login");
 
 await page.type('input[name="email"]', "admin@example.com");
 await page.type('input[name="password"]', "changeme-admin-pass");
 await Promise.all([
   page.click('button[type="submit"]'),
-  page.waitForNavigation({ waitUntil: "networkidle0" }),
+  page.waitForNavigation({ waitUntil: "domcontentloaded" }),
 ]);
-await shot("02-machines");
+await new Promise((r) => setTimeout(r, 800));
+await shot("slate-02-machines");
 
-await page.goto(`${BASE}/proxies`, { waitUntil: "networkidle0" });
-await shot("03-proxies");
+const clicked = await page.evaluate(() => {
+  const tabs = [...document.querySelectorAll("button")];
+  const t = tabs.find((b) => (b.textContent || "").includes("1tech2"));
+  if (t) {
+    t.click();
+    return true;
+  }
+  return false;
+});
+if (clicked) {
+  await new Promise((r) => setTimeout(r, 1200));
+  await shot("slate-02b-machines-server-tab");
+}
 
-await page.goto(`${BASE}/wipeout`, { waitUntil: "networkidle0" });
-await shot("04-wipeout");
+await go(`${BASE}/proxies`);
+await shot("slate-03-proxies");
 
-await page.goto(`${BASE}/archive`, { waitUntil: "networkidle0" });
-await shot("05-archive");
+await go(`${BASE}/wipeout`);
+await shot("slate-04-wipeout");
 
-await page.goto(`${BASE}/settings`, { waitUntil: "networkidle0" });
-await shot("06-settings");
+await go(`${BASE}/archive`);
+await shot("slate-05-archive");
+
+await go(`${BASE}/settings`);
+await shot("slate-06-settings");
 
 await browser.close();
 console.log("smoke screenshots done");

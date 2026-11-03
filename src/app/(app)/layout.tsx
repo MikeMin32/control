@@ -17,7 +17,7 @@ export default async function AppLayout({
       <Sidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <Header email={user.email} proxmox={getProxmoxStatusSync()} />
-        <main className="flex-1 overflow-auto p-5 md:p-6">{children}</main>
+        <main className="flex-1 overflow-auto bg-canvas p-5 md:p-7">{children}</main>
       </div>
     </div>
   );
