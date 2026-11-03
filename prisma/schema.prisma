@@ -1,0 +1,268 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum LifecycleStatus {
+  PREPARING
+  ACTIVE
+  EXPIRED
+  BURNED
+  ARCHIVED
+}
+
+enum ProxyAvailability {
+  AVAILABLE
+  ASSIGNED
+  RETIRED
+}
+
+enum BillingStatus {
+  ACTIVE
+  CANCELLATION_PENDING
+  CANCELLED
+  UNKNOWN
+}
+
+enum ClosureReason {
+  BURNED
+  EXPIRED
+  OTHER
+}
+
+enum ChecklistItemStatus {
+  PENDING
+  COMPLETED
+  NOT_APPLICABLE
+}
+
+model User {
+  id           String    @id @default(uuid()) @db.Uuid
+  email        String    @unique
+  passwordHash String
+  displayName  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  sessions     Session[]
+  activities   ActivityEvent[]
+  checklistCompletions ClosureChecklistItem[] @relation("CompletedBy")
+  closures     ClosureChecklist[] @relation("ClosedBy")
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @db.Uuid
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model LoginAttempt {
+  id        String   @id @default(uuid()) @db.Uuid
+  ip        String
+  email     String
+  success   Boolean
+  createdAt DateTime @default(now())
+
+  @@index([ip, createdAt])
+  @@index([email, createdAt])
+}
+
+model AppSettings {
+  id               Int      @id @default(1)
+  displayTimezone  String   @default("Europe/Kyiv")
+  updatedAt        DateTime @updatedAt
+}
+
+model Server {
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String   @unique
+  notes      String?
+  retiredAt  DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  machines   Machine[]
+  migrationsFrom MachineMigration[] @relation("FromServer")
+  migrationsTo   MachineMigration[] @relation("ToServer")
+}
+
+model Company {
+  id        String    @id @default(uuid()) @db.Uuid
+  name      String    @unique
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  machines  Machine[]
+}
+
+model Machine {
+  id              String          @id @default(uuid()) @db.Uuid
+  vmid            Int
+  displayName     String?
+  serverId        String          @db.Uuid
+  companyId       String          @db.Uuid
+  lifecycleStatus LifecycleStatus @default(PREPARING)
+  internalIp      String?
+  os              String?
+  notes           String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  archivedAt      DateTime?
+
+  server          Server          @relation(fields: [serverId], references: [id])
+  company         Company         @relation(fields: [companyId], references: [id])
+  proxyAssignments ProxyAssignment[]
+  migrations      MachineMigration[]
+  closure         ClosureChecklist?
+  activities      ActivityEvent[]
+
+  @@index([serverId])
+  @@index([companyId])
+  @@index([lifecycleStatus])
+  @@index([vmid])
+}
+
+/// Partial unique: only one non-archived machine per server+vmid
+/// Enforced via raw SQL migration CREATE UNIQUE INDEX ... WHERE archived_at IS NULL
+
+model MachineMigration {
+  id            String   @id @default(uuid()) @db.Uuid
+  machineId     String   @db.Uuid
+  fromServerId  String   @db.Uuid
+  toServerId    String   @db.Uuid
+  fromVmid      Int
+  toVmid        Int
+  note          String?
+  createdAt     DateTime @default(now())
+  actorId       String?  @db.Uuid
+
+  machine    Machine @relation(fields: [machineId], references: [id])
+  fromServer Server  @relation("FromServer", fields: [fromServerId], references: [id])
+  toServer   Server  @relation("ToServer", fields: [toServerId], references: [id])
+
+  @@index([machineId])
+}
+
+model Proxy {
+  id               String            @id @default(uuid()) @db.Uuid
+  ip               String
+  provider         String
+  endpointHostname String?
+  endpointPort     Int?
+  country          String?
+  region           String?
+  city             String?
+  renewalDate      DateTime?         @db.Date
+  monthlyCost      Decimal?          @db.Decimal(10, 2)
+  currency         String?           @default("USD")
+  notes            String?
+  availability     ProxyAvailability @default(AVAILABLE)
+  billingStatus    BillingStatus     @default(ACTIVE)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  assignments ProxyAssignment[]
+
+  @@unique([ip, provider])
+  @@index([availability])
+  @@index([billingStatus])
+  @@index([ip])
+}
+
+model ProxyAssignment {
+  id         String    @id @default(uuid()) @db.Uuid
+  machineId  String    @db.Uuid
+  proxyId    String    @db.Uuid
+  startedAt  DateTime  @default(now())
+  endedAt    DateTime?
+  reason     String?
+  actorId    String?   @db.Uuid
+
+  machine Machine @relation(fields: [machineId], references: [id])
+  proxy   Proxy   @relation(fields: [proxyId], references: [id])
+
+  @@index([machineId, endedAt])
+  @@index([proxyId, endedAt])
+}
+
+/// At most one open assignment per proxy — partial unique WHERE ended_at IS NULL
+/// At most one open assignment per machine — partial unique WHERE ended_at IS NULL
+
+model ChecklistTemplate {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  isDefault Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  items     ChecklistTemplateItem[]
+}
+
+model ChecklistTemplateItem {
+  id         String  @id @default(uuid()) @db.Uuid
+  templateId String  @db.Uuid
+  label      String
+  required   Boolean @default(true)
+  sortOrder  Int     @default(0)
+
+  template ChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId])
+}
+
+model ClosureChecklist {
+  id              String         @id @default(uuid()) @db.Uuid
+  machineId       String         @unique @db.Uuid
+  reason          ClosureReason
+  reasonNote      String?
+  startedAt       DateTime       @default(now())
+  completedAt     DateTime?
+  completedById   String?        @db.Uuid
+  templateName    String
+  actorId         String?        @db.Uuid
+
+  machine     Machine                 @relation(fields: [machineId], references: [id])
+  completedBy User?                   @relation("ClosedBy", fields: [completedById], references: [id])
+  items       ClosureChecklistItem[]
+}
+
+model ClosureChecklistItem {
+  id              String              @id @default(uuid()) @db.Uuid
+  checklistId     String              @db.Uuid
+  label           String
+  required        Boolean             @default(true)
+  sortOrder       Int                 @default(0)
+  status          ChecklistItemStatus @default(PENDING)
+  notes           String?
+  naReason        String?
+  completedAt     DateTime?
+  completedById   String?             @db.Uuid
+
+  checklist   ClosureChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  completedBy User?            @relation("CompletedBy", fields: [completedById], references: [id])
+
+  @@index([checklistId])
+}
+
+model ActivityEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  machineId String?  @db.Uuid
+  actorId   String?  @db.Uuid
+  type      String
+  message   String
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  machine Machine? @relation(fields: [machineId], references: [id])
+  actor   User?    @relation(fields: [actorId], references: [id])
+
+  @@index([machineId, createdAt])
+  @@index([createdAt])
+}
