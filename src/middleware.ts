@@ -7,7 +7,9 @@ export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (
     PUBLIC.some((p) => pathname === p || pathname.startsWith("/_next")) ||
-    pathname.startsWith("/favicon")
+    pathname.startsWith("/favicon") ||
+    pathname === "/icon.svg" ||
+    pathname.startsWith("/icon")
   ) {
     return NextResponse.next();
   }

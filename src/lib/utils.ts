@@ -90,10 +90,23 @@ export function serializeDecimal(value: unknown): number | null {
 }
 
 export function serializeProxy<T extends { monthlyCost?: unknown }>(proxy: T) {
-  return {
-    ...proxy,
-    monthlyCost: serializeDecimal(proxy.monthlyCost),
-  };
+  // Spread + override is not enough for Next's RSC flight checks in all cases —
+  // rebuild a plain object so no Prisma Decimal instance remains on the wire.
+  const plain = { ...proxy } as T & { monthlyCost: number | null };
+  plain.monthlyCost = serializeDecimal(proxy.monthlyCost);
+  return JSON.parse(
+    JSON.stringify(plain, (_key, value) => {
+      if (
+        value != null &&
+        typeof value === "object" &&
+        typeof (value as { toNumber?: unknown }).toNumber === "function" &&
+        typeof (value as { toFixed?: unknown }).toFixed === "function"
+      ) {
+        return (value as { toNumber: () => number }).toNumber();
+      }
+      return value;
+    }),
+  ) as T & { monthlyCost: number | null };
 }
 
 export function serializeMachineProxies<
