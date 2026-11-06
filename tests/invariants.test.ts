@@ -103,12 +103,41 @@ describe("VM Control business invariants", () => {
         serverId: server.id,
         companyId: company.id,
         displayName: "web",
+        internalIp: "192.168.201.10",
+        country: "DE",
       },
       actor.id,
     );
     const reloaded = await getMachine(m.id);
     expect(reloaded.vmid).toBe(101);
     expect(reloaded.displayName).toBe("web");
+    expect(reloaded.internalIp).toBe("192.168.201.10");
+    expect(reloaded.country).toBe("DE");
+  });
+
+  it("1b. search includes internal IP; country optional and unset by default", async () => {
+    const { createMachine, listMachines, updateMachine } = await import(
+      "../src/lib/services/machines"
+    );
+    const actor = await user();
+    const server = await prisma.server.create({ data: { name: "1tech2" } });
+    const company = await prisma.company.create({ data: { name: "Acme" } });
+    const m = await createMachine(
+      { vmid: 202, serverId: server.id, companyId: company.id },
+      actor.id,
+    );
+    expect(m.country).toBeNull();
+    expect(m.internalIp).toBeNull();
+    await updateMachine(
+      m.id,
+      { internalIp: "10.0.0.55", country: "UA" },
+      actor.id,
+    );
+    const found = await listMachines({ q: "10.0.0.55" });
+    expect(found.total).toBe(1);
+    expect(found.items[0].id).toBe(m.id);
+    const byCountry = await listMachines({ q: "UA" });
+    expect(byCountry.items.some((x) => x.id === m.id)).toBe(true);
   });
 
   it("2. filter machines by server", async () => {

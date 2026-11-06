@@ -9,6 +9,7 @@ import {
 import { listProxies } from "@/lib/services/proxies";
 import { prisma } from "@/lib/db";
 import { getProxmoxStatusSync } from "@/lib/proxmox";
+import { serializeMachineProxies, serializeProxy } from "@/lib/utils";
 import type { LifecycleStatus } from "@prisma/client";
 
 export default async function MachinesPage({
@@ -53,7 +54,7 @@ export default async function MachinesPage({
   let selected = null;
   if (id) {
     try {
-      selected = await getMachine(id);
+      selected = serializeMachineProxies(await getMachine(id));
     } catch {
       selected = null;
     }
@@ -62,13 +63,13 @@ export default async function MachinesPage({
   return (
     <Suspense fallback={<div className="text-sm text-muted">Loading…</div>}>
       <MachinesView
-        machines={list.items}
+        machines={list.items.map(serializeMachineProxies)}
         total={list.total}
         page={list.page}
         pageSize={list.pageSize}
         servers={servers}
         companies={companies}
-        availableProxies={availableProxies}
+        availableProxies={availableProxies.map(serializeProxy)}
         timezone={settings.displayTimezone}
         selected={selected}
         initialServerId={serverId || ""}

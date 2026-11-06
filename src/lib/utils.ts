@@ -72,3 +72,41 @@ export function isRenewalOverdue(
   const todayStr = `${today.getUTCFullYear()}-${String(today.getUTCMonth() + 1).padStart(2, "0")}-${String(today.getUTCDate()).padStart(2, "0")}`;
   return s < todayStr;
 }
+
+/** Prisma Decimal is not RSC-serializable — convert before Client Components. */
+export function serializeDecimal(value: unknown): number | null {
+  if (value == null) return null;
+  if (typeof value === "number") return value;
+  if (typeof value === "string") return Number(value);
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toNumber" in value &&
+    typeof (value as { toNumber: unknown }).toNumber === "function"
+  ) {
+    return (value as { toNumber: () => number }).toNumber();
+  }
+  return Number(value);
+}
+
+export function serializeProxy<T extends { monthlyCost?: unknown }>(proxy: T) {
+  return {
+    ...proxy,
+    monthlyCost: serializeDecimal(proxy.monthlyCost),
+  };
+}
+
+export function serializeMachineProxies<
+  T extends {
+    proxyAssignments?: { proxy: { monthlyCost?: unknown } }[];
+  },
+>(machine: T): T {
+  if (!machine.proxyAssignments) return machine;
+  return {
+    ...machine,
+    proxyAssignments: machine.proxyAssignments.map((a) => ({
+      ...a,
+      proxy: serializeProxy(a.proxy),
+    })),
+  };
+}

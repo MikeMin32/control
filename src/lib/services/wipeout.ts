@@ -161,7 +161,10 @@ export async function updateChecklistItem(
       where: { id: itemId },
       data: {
         status: input.status,
-        notes: input.notes?.trim() || null,
+        notes:
+          input.notes === undefined
+            ? undefined
+            : input.notes.trim() || null,
         naReason:
           input.status === ChecklistItemStatus.NOT_APPLICABLE
             ? input.naReason?.trim() || null

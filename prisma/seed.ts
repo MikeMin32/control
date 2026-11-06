@@ -169,6 +169,8 @@ async function main() {
       lifecycleStatus: LifecycleStatus;
       archivedAt?: Date | null;
       notes?: string;
+      internalIp?: string;
+      country?: string;
     },
   ) {
     const existing = await prisma.machine.findFirst({
@@ -193,6 +195,8 @@ async function main() {
     companyId: cAlpha.id,
     displayName: "web-alpha",
     lifecycleStatus: LifecycleStatus.ACTIVE,
+    internalIp: "192.168.201.10",
+    country: "DE",
   });
   const mPrep = await ensureMachine("prep-110", {
     vmid: 110,
@@ -200,6 +204,8 @@ async function main() {
     companyId: cBeta.id,
     displayName: "staging-beta",
     lifecycleStatus: LifecycleStatus.PREPARING,
+    internalIp: "192.168.201.20",
+    country: "NL",
   });
   const mExpired = await ensureMachine("expired-220", {
     vmid: 220,
@@ -207,6 +213,7 @@ async function main() {
     companyId: cGamma.id,
     displayName: "shop-gamma",
     lifecycleStatus: LifecycleStatus.EXPIRED,
+    country: "GB",
   });
   const mBurned = await ensureMachine("burned-305", {
     vmid: 305,

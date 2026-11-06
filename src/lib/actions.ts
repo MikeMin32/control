@@ -90,6 +90,7 @@ export async function createMachineAction(input: {
   companyId: string;
   lifecycleStatus?: LifecycleStatus;
   internalIp?: string;
+  country?: string | null;
   os?: string;
   notes?: string;
 }) {

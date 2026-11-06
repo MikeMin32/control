@@ -3,6 +3,7 @@ import {
   listProxies,
   listUnresolvedCancellations,
 } from "@/lib/services/proxies";
+import { serializeProxy } from "@/lib/utils";
 
 export default async function ProxiesPage() {
   const [proxies, pendingCancellations] = await Promise.all([
@@ -11,8 +12,8 @@ export default async function ProxiesPage() {
   ]);
   return (
     <ProxiesView
-      proxies={proxies}
-      pendingCancellations={pendingCancellations}
+      proxies={proxies.map(serializeProxy)}
+      pendingCancellations={pendingCancellations.map(serializeProxy)}
     />
   );
 }

@@ -1,10 +1,10 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  ChevronDown,
   Copy,
-  MoreHorizontal,
   Monitor,
   Plus,
   RefreshCw,
@@ -20,6 +20,8 @@ import type {
   Server,
 } from "@prisma/client";
 import { Button } from "@/components/ui/button";
+import { CountryFlag } from "@/components/ui/country-flag";
+import { CountrySelect } from "@/components/ui/country-select";
 import { Drawer } from "@/components/ui/drawer";
 import { Dialog } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
@@ -33,6 +35,7 @@ import {
   startClosureAction,
   updateMachineAction,
 } from "@/lib/actions";
+import { countryName } from "@/lib/countries";
 import {
   LIFECYCLE_DOT,
   LIFECYCLE_LABELS,
@@ -50,6 +53,10 @@ type MachineRow = Machine & {
   server: Server;
   company: Company;
   proxyAssignments: (ProxyAssignment & { proxy: Proxy })[];
+  closure?: {
+    id: string;
+    completedAt: Date | string | null;
+  } | null;
 };
 
 type DetailMachine = MachineRow & {
@@ -73,6 +80,7 @@ type DetailMachine = MachineRow & {
   closure: {
     id: string;
     reason: string;
+    completedAt?: Date | string | null;
     items: { id: string; label: string; status: string; required: boolean }[];
   } | null;
 };
@@ -115,10 +123,13 @@ export function MachinesView({
   const [pending, startTransition] = useTransition();
   const [addOpen, setAddOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copyToast, setCopyToast] = useState<string | null>(null);
   const [tab, setTab] = useState<"overview" | "proxy" | "activity">("overview");
   const [rotateOpen, setRotateOpen] = useState(false);
+  const [rotateMachineId, setRotateMachineId] = useState<string | null>(null);
   const [migrateOpen, setMigrateOpen] = useState(false);
   const [rowMenu, setRowMenu] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   const activeServers = useMemo(
     () => servers.filter((s) => !s.retiredAt),
@@ -126,6 +137,26 @@ export function MachinesView({
   );
 
   const selectedServer = activeServers.find((s) => s.id === initialServerId);
+  const rotateTarget =
+    machines.find((m) => m.id === rotateMachineId) ||
+    (selected?.id === rotateMachineId ? selected : null);
+
+  useEffect(() => {
+    if (!rowMenu) return;
+    function onDoc(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setRowMenu(null);
+      }
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [rowMenu]);
+
+  useEffect(() => {
+    if (!copyToast) return;
+    const t = window.setTimeout(() => setCopyToast(null), 1600);
+    return () => window.clearTimeout(t);
+  }, [copyToast]);
 
   function setQuery(patch: Record<string, string | null>) {
     const sp = new URLSearchParams(searchParams.toString());
@@ -149,12 +180,84 @@ export function MachinesView({
     router.push(`/machines?${sp.toString()}`);
   }
 
-  async function copyText(text: string) {
+  async function copyText(text: string, label: string) {
     try {
       await navigator.clipboard.writeText(text);
+      setCopyToast(`${label} copied`);
     } catch {
-      /* ignore */
+      setCopyToast("Copy failed");
     }
+  }
+
+  function rotateDisabledReason(m: MachineRow) {
+    if (m.lifecycleStatus === "ARCHIVED" || m.archivedAt) {
+      return "Archived machines cannot rotate proxy";
+    }
+    if (m.lifecycleStatus === "BURNED") {
+      return "Burned machines cannot rotate proxy — continue wipeout instead";
+    }
+    return null;
+  }
+
+  function hasOpenWipeout(m: MachineRow) {
+    return Boolean(m.closure && !m.closure.completedAt);
+  }
+
+  function canStartWipeout(m: MachineRow) {
+    if (m.archivedAt || m.lifecycleStatus === "ARCHIVED") return false;
+    if (hasOpenWipeout(m)) return false;
+    return (
+      m.lifecycleStatus === "ACTIVE" ||
+      m.lifecycleStatus === "PREPARING" ||
+      m.lifecycleStatus === "EXPIRED" ||
+      m.lifecycleStatus === "BURNED"
+    );
+  }
+
+  function wipeoutDisabledReason(m: MachineRow) {
+    if (m.archivedAt || m.lifecycleStatus === "ARCHIVED") {
+      return "Archived machines have no open wipeout";
+    }
+    if (hasOpenWipeout(m)) return null;
+    return null;
+  }
+
+  function openRotateFor(m: MachineRow) {
+    setRowMenu(null);
+    const reason = rotateDisabledReason(m);
+    if (reason) {
+      setError(reason);
+      return;
+    }
+    setError(null);
+    setRotateMachineId(m.id);
+    setRotateOpen(true);
+  }
+
+  function startOrContinueWipeout(m: MachineRow) {
+    setRowMenu(null);
+    if (hasOpenWipeout(m)) {
+      router.push(`/wipeout?id=${m.id}`);
+      return;
+    }
+    if (!canStartWipeout(m)) {
+      setError(wipeoutDisabledReason(m) || "Cannot start wipeout for this VM");
+      return;
+    }
+    startTransition(async () => {
+      const reason =
+        m.lifecycleStatus === "EXPIRED" ? "EXPIRED" : "BURNED";
+      const res =
+        reason === "EXPIRED"
+          ? await startClosureAction(m.id, "EXPIRED")
+          : await markBurnedAction(m.id);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      router.push(`/wipeout?id=${m.id}`);
+      router.refresh();
+    });
   }
 
   return (
@@ -235,7 +338,7 @@ export function MachinesView({
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <Input
             className="pl-9"
-            placeholder="Search VMID, name, company, proxy IP"
+            placeholder="Search VMID, name, company, internal IP, country, proxy"
             defaultValue={initialQ}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -264,26 +367,46 @@ export function MachinesView({
         </Select>
       </div>
 
+      {copyToast ? (
+        <div
+          role="status"
+          className="fixed bottom-4 right-4 z-40 rounded-slate border border-line bg-surface px-3 py-2 text-sm text-ink shadow-soft"
+        >
+          {copyToast}
+        </div>
+      ) : null}
+
+      {error && !selected && !addOpen && !rotateOpen ? (
+        <p className="text-sm text-rose-700" role="alert">
+          {error}
+        </p>
+      ) : null}
+
       <div className="overflow-x-auto rounded-xl border border-line bg-surface">
         <table className="min-w-full text-left text-sm">
           <thead className="table-head">
             <tr>
               <th className="px-4 py-3 font-medium">VM</th>
               <th className="px-4 py-3 font-medium">Company</th>
-              {!initialServerId ? (
-                <th className="px-4 py-3 font-medium">Server</th>
-              ) : null}
+              <th className="px-4 py-3 font-medium">Country</th>
               <th className="px-4 py-3 font-medium">Status</th>
-              <th className="px-4 py-3 font-medium">Proxy IP</th>
+              <th className="whitespace-nowrap px-4 py-3 font-medium">
+                Internal IP
+              </th>
+              <th className="whitespace-nowrap px-4 py-3 font-medium">
+                Proxy IP
+              </th>
               <th className="px-4 py-3 font-medium">Renewal</th>
-              <th className="px-4 py-3 font-medium" />
+              <th className="px-4 py-3 font-medium">
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
             {machines.length === 0 ? (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="px-4 py-14 text-center text-muted"
                 >
                   No machines match these filters.
@@ -293,11 +416,12 @@ export function MachinesView({
               machines.map((m) => {
                 const current = m.proxyAssignments[0]?.proxy;
                 const overdue = isRenewalOverdue(current?.renewalDate ?? null);
+                const rotateBlocked = rotateDisabledReason(m);
+                const wipeoutContinue = hasOpenWipeout(m);
                 return (
                   <tr
                     key={m.id}
-                    className="cursor-pointer border-b border-line last:border-0 hover:bg-sidebar/50"
-                    onClick={() => openMachine(m.id)}
+                    className="border-b border-line last:border-0 hover:bg-sidebar/50"
                   >
                     <td className="px-4 py-3.5">
                       <div className="flex items-center gap-2.5">
@@ -317,9 +441,9 @@ export function MachinesView({
                       </div>
                     </td>
                     <td className="px-4 py-3.5 text-ink">{m.company.name}</td>
-                    {!initialServerId ? (
-                      <td className="px-4 py-3.5 text-ink">{m.server.name}</td>
-                    ) : null}
+                    <td className="px-4 py-3.5">
+                      <CountryFlag code={m.country} />
+                    </td>
                     <td className="px-4 py-3.5">
                       <StatusPill
                         label={LIFECYCLE_LABELS[m.lifecycleStatus]}
@@ -328,13 +452,32 @@ export function MachinesView({
                       />
                     </td>
                     <td className="px-4 py-3.5">
+                      {m.internalIp ? (
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-1.5 whitespace-nowrap font-mono text-[12px] text-ink hover:underline"
+                          aria-label={`Copy internal IP ${m.internalIp}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void copyText(m.internalIp!, "Internal IP");
+                          }}
+                        >
+                          {m.internalIp}
+                          <Copy className="h-3 w-3 text-muted" />
+                        </button>
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3.5">
                       {current ? (
                         <button
                           type="button"
-                          className="inline-flex items-center gap-1.5 font-mono text-[12px] text-ink hover:underline"
+                          className="inline-flex items-center gap-1.5 whitespace-nowrap font-mono text-[12px] text-ink hover:underline"
+                          aria-label={`Copy proxy IP ${current.ip}`}
                           onClick={(e) => {
                             e.stopPropagation();
-                            void copyText(current.ip);
+                            void copyText(current.ip, "Proxy IP");
                           }}
                         >
                           {current.ip}
@@ -344,7 +487,7 @@ export function MachinesView({
                         <span className="text-muted">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-4 py-3.5 whitespace-nowrap">
                       {current?.renewalDate ? (
                         <span
                           className={
@@ -366,35 +509,75 @@ export function MachinesView({
                       )}
                     </td>
                     <td className="relative px-4 py-3.5 text-right">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        aria-label="Row actions"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setRowMenu(rowMenu === m.id ? null : m.id);
-                        }}
+                      <div
+                        className="inline-flex items-center gap-1.5"
+                        ref={rowMenu === m.id ? menuRef : undefined}
                       >
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                      {rowMenu === m.id ? (
-                        <div
-                          className="absolute right-4 z-20 mt-1 w-40 overflow-hidden rounded-slate border border-line bg-surface text-left shadow-soft"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            type="button"
-                            className="block w-full px-3 py-2 text-sm hover:bg-sidebar"
-                            onClick={() => {
-                              setRowMenu(null);
-                              openMachine(m.id);
+                        <div className="relative">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 whitespace-nowrap px-2.5"
+                            aria-haspopup="menu"
+                            aria-expanded={rowMenu === m.id}
+                            aria-label={`Actions for VM ${m.vmid}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setRowMenu(rowMenu === m.id ? null : m.id);
                             }}
                           >
-                            Open details
-                          </button>
+                            Actions
+                            <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                          </Button>
+                          {rowMenu === m.id ? (
+                            <div
+                              role="menu"
+                              className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-slate border border-line bg-surface text-left shadow-soft"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <button
+                                type="button"
+                                role="menuitem"
+                                disabled={Boolean(rotateBlocked)}
+                                title={rotateBlocked || undefined}
+                                className="block w-full px-3 py-2 text-sm hover:bg-sidebar disabled:cursor-not-allowed disabled:opacity-50"
+                                onClick={() => openRotateFor(m)}
+                              >
+                                Rotate IP
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                disabled={
+                                  !wipeoutContinue && !canStartWipeout(m)
+                                }
+                                title={
+                                  wipeoutDisabledReason(m) || undefined
+                                }
+                                className="block w-full px-3 py-2 text-sm hover:bg-sidebar disabled:cursor-not-allowed disabled:opacity-50"
+                                onClick={() => startOrContinueWipeout(m)}
+                              >
+                                {wipeoutContinue
+                                  ? "Continue wipeout"
+                                  : "Start wipeout"}
+                              </button>
+                            </div>
+                          ) : null}
                         </div>
-                      ) : null}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 whitespace-nowrap px-2.5"
+                          aria-label={`View VM ${m.vmid}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRowMenu(null);
+                            openMachine(m.id);
+                          }}
+                        >
+                          View
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -463,6 +646,7 @@ export function MachinesView({
                   fd.get("lifecycleStatus"),
                 ) as LifecycleStatus,
                 internalIp: String(fd.get("internalIp") || "") || undefined,
+                country: String(fd.get("country") || "") || null,
                 os: String(fd.get("os") || "") || undefined,
                 notes: String(fd.get("notes") || "") || undefined,
               });
@@ -520,9 +704,12 @@ export function MachinesView({
                 ))}
             </Select>
           </Field>
+          <Field label="Country">
+            <CountrySelect name="country" defaultValue="" />
+          </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Internal IP">
-              <Input name="internalIp" />
+              <Input name="internalIp" placeholder="192.168.201.10" />
             </Field>
             <Field label="OS">
               <Input name="os" />
@@ -531,12 +718,107 @@ export function MachinesView({
           <Field label="Notes">
             <Textarea name="notes" rows={2} />
           </Field>
-          {error ? (
+          {error && addOpen ? (
             <p className="text-sm text-rose-700" role="alert">
               {error}
             </p>
           ) : null}
         </form>
+      </Dialog>
+
+      <Dialog
+        open={rotateOpen}
+        onClose={() => {
+          setRotateOpen(false);
+          setRotateMachineId(null);
+        }}
+        title="Rotate proxy"
+        footer={
+          <>
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setRotateOpen(false);
+                setRotateMachineId(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              form="rotate-form"
+              type="submit"
+              disabled={pending || !rotateTarget}
+            >
+              Confirm rotate
+            </Button>
+          </>
+        }
+      >
+        <p className="mb-3 text-sm text-muted">
+          Records a proxy replacement in the database only. Does not change
+          GOST, SSH, or provider billing.
+        </p>
+        {rotateTarget ? (
+          <form
+            id="rotate-form"
+            className="space-y-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const fd = new FormData(e.currentTarget);
+              startTransition(async () => {
+                const res = await rotateProxyAction(rotateTarget.id, {
+                  proxyId: String(fd.get("proxyId")),
+                  reason: String(fd.get("reason")),
+                });
+                if (!res.ok) setError(res.error);
+                else {
+                  setRotateOpen(false);
+                  setRotateMachineId(null);
+                  setError(null);
+                  router.refresh();
+                }
+              });
+            }}
+          >
+            <Field label="VM">
+              <Input
+                disabled
+                value={`VM ${rotateTarget.vmid}${rotateTarget.displayName ? ` · ${rotateTarget.displayName}` : ""}`}
+              />
+            </Field>
+            <Field label="Current">
+              <Input
+                disabled
+                value={
+                  rotateTarget.proxyAssignments.find((a) => !a.endedAt)?.proxy
+                    .ip || "None"
+                }
+              />
+            </Field>
+            <Field label="New proxy">
+              <Select name="proxyId" required>
+                {availableProxies.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.ip} · {p.provider}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Reason">
+              <Input
+                name="reason"
+                required
+                placeholder="Replacement reason"
+              />
+            </Field>
+            {error && rotateOpen ? (
+              <p className="text-sm text-rose-700" role="alert">
+                {error}
+              </p>
+            ) : null}
+          </form>
+        ) : null}
       </Dialog>
 
       <Drawer
@@ -593,7 +875,7 @@ export function MachinesView({
                     const res = await markBurnedAction(selected.id);
                     if (!res.ok) setError(res.error);
                     else {
-                      router.push("/wipeout");
+                      router.push(`/wipeout?id=${selected.id}`);
                       router.refresh();
                     }
                   });
@@ -606,13 +888,19 @@ export function MachinesView({
                     );
                     if (!res.ok) setError(res.error);
                     else {
-                      router.push("/wipeout");
+                      router.push(`/wipeout?id=${selected.id}`);
                       router.refresh();
                     }
                   });
                 }}
-                onRotate={() => setRotateOpen(true)}
+                onRotate={() => {
+                  setRotateMachineId(selected.id);
+                  setRotateOpen(true);
+                }}
                 onMigrate={() => setMigrateOpen(true)}
+                onContinueWipeout={() =>
+                  router.push(`/wipeout?id=${selected.id}`)
+                }
                 error={error}
               />
             ) : null}
@@ -624,77 +912,6 @@ export function MachinesView({
             {tab === "activity" ? (
               <ActivityList items={selected.activities} timezone={timezone} />
             ) : null}
-
-            <Dialog
-              open={rotateOpen}
-              onClose={() => setRotateOpen(false)}
-              title="Rotate proxy"
-              footer={
-                <>
-                  <Button variant="ghost" onClick={() => setRotateOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="primary"
-                    form="rotate-form"
-                    type="submit"
-                    disabled={pending}
-                  >
-                    Confirm rotate
-                  </Button>
-                </>
-              }
-            >
-              <p className="mb-3 text-sm text-muted">
-                Records a proxy replacement in the database only. Does not
-                change GOST, SSH, or provider billing.
-              </p>
-              <form
-                id="rotate-form"
-                className="space-y-3"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const fd = new FormData(e.currentTarget);
-                  startTransition(async () => {
-                    const res = await rotateProxyAction(selected.id, {
-                      proxyId: String(fd.get("proxyId")),
-                      reason: String(fd.get("reason")),
-                    });
-                    if (!res.ok) setError(res.error);
-                    else {
-                      setRotateOpen(false);
-                      router.refresh();
-                    }
-                  });
-                }}
-              >
-                <Field label="Current">
-                  <Input
-                    disabled
-                    value={
-                      selected.proxyAssignments.find((a) => !a.endedAt)?.proxy
-                        .ip || "None"
-                    }
-                  />
-                </Field>
-                <Field label="New proxy">
-                  <Select name="proxyId" required>
-                    {availableProxies.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.ip} · {p.provider}
-                      </option>
-                    ))}
-                  </Select>
-                </Field>
-                <Field label="Reason">
-                  <Input
-                    name="reason"
-                    required
-                    placeholder="Replacement reason"
-                  />
-                </Field>
-              </form>
-            </Dialog>
 
             <Dialog
               open={migrateOpen}
@@ -854,6 +1071,7 @@ function Overview({
   onExpireClosure,
   onRotate,
   onMigrate,
+  onContinueWipeout,
   error,
 }: {
   machine: DetailMachine;
@@ -865,6 +1083,7 @@ function Overview({
     companyId?: string;
     lifecycleStatus?: LifecycleStatus;
     internalIp?: string | null;
+    country?: string | null;
     os?: string | null;
     notes?: string | null;
   }) => void;
@@ -872,9 +1091,11 @@ function Overview({
   onExpireClosure: () => void;
   onRotate: () => void;
   onMigrate: () => void;
+  onContinueWipeout: () => void;
   error: string | null;
 }) {
   const current = machine.proxyAssignments.find((a) => !a.endedAt)?.proxy;
+  const openWipeout = Boolean(machine.closure && !machine.closure.completedAt);
   return (
     <form
       className="space-y-3"
@@ -886,6 +1107,7 @@ function Overview({
           companyId: String(fd.get("companyId")),
           lifecycleStatus: String(fd.get("lifecycleStatus")) as LifecycleStatus,
           internalIp: String(fd.get("internalIp") || "") || null,
+          country: String(fd.get("country") || "") || null,
           os: String(fd.get("os") || "") || null,
           notes: String(fd.get("notes") || "") || null,
         });
@@ -912,6 +1134,14 @@ function Overview({
             pillClass={LIFECYCLE_PILL[machine.lifecycleStatus]}
           />
         </div>
+        <div className="col-span-2">
+          <div className="text-xs text-muted">Country</div>
+          <div>
+            {machine.country
+              ? `${countryName(machine.country) ?? machine.country}`
+              : "—"}
+          </div>
+        </div>
       </div>
       <Field label="Display name">
         <Input name="displayName" defaultValue={machine.displayName || ""} />
@@ -935,6 +1165,9 @@ function Overview({
               </option>
             ))}
         </Select>
+      </Field>
+      <Field label="Country">
+        <CountrySelect name="country" defaultValue={machine.country || ""} />
       </Field>
       <div className="grid grid-cols-2 gap-3">
         <Field label="Internal IP">
@@ -962,14 +1195,22 @@ function Overview({
         <Button type="button" variant="outline" onClick={onMigrate}>
           Migrate
         </Button>
-        <Button type="button" variant="danger" onClick={onBurned}>
-          Mark burned
-        </Button>
-        {machine.lifecycleStatus === "EXPIRED" && !machine.closure ? (
-          <Button type="button" variant="outline" onClick={onExpireClosure}>
-            Start wipeout
+        {openWipeout ? (
+          <Button type="button" variant="outline" onClick={onContinueWipeout}>
+            Continue wipeout
           </Button>
-        ) : null}
+        ) : (
+          <>
+            <Button type="button" variant="danger" onClick={onBurned}>
+              Mark burned
+            </Button>
+            {machine.lifecycleStatus === "EXPIRED" && !machine.closure ? (
+              <Button type="button" variant="outline" onClick={onExpireClosure}>
+                Start wipeout
+              </Button>
+            ) : null}
+          </>
+        )}
       </div>
       <p className="text-xs text-muted">
         Mark burned opens a manual wipeout checklist. Ticking items does not

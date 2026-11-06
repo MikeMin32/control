@@ -5,6 +5,7 @@ import {
 import { prisma } from "../db";
 import { AppError } from "../errors";
 import { logActivity } from "../activity";
+import { normalizeCountryCode } from "../countries";
 
 export type MachineListParams = {
   serverId?: string | null;
@@ -41,6 +42,8 @@ export async function listMachines(params: MachineListParams) {
     where.OR = [
       { displayName: { contains: q, mode: "insensitive" } },
       { company: { name: { contains: q, mode: "insensitive" } } },
+      { internalIp: { contains: q, mode: "insensitive" } },
+      { country: { equals: q.toUpperCase(), mode: "insensitive" } },
       {
         proxyAssignments: {
           some: {
@@ -157,6 +160,7 @@ export async function createMachine(
     companyId: string;
     lifecycleStatus?: LifecycleStatus;
     internalIp?: string;
+    country?: string | null;
     os?: string;
     notes?: string;
   },
@@ -164,6 +168,10 @@ export async function createMachine(
 ) {
   if (!Number.isInteger(input.vmid) || input.vmid <= 0) {
     throw new AppError("VMID must be a positive integer");
+  }
+  const country = normalizeCountryCode(input.country);
+  if (input.country?.trim() && !country) {
+    throw new AppError("Country must be a valid ISO 3166-1 alpha-2 code");
   }
 
   return prisma.$transaction(async (tx) => {
@@ -178,6 +186,7 @@ export async function createMachine(
           companyId: input.companyId,
           lifecycleStatus: input.lifecycleStatus ?? LifecycleStatus.PREPARING,
           internalIp: input.internalIp?.trim() || null,
+          country,
           os: input.os?.trim() || null,
           notes: input.notes?.trim() || null,
         },
@@ -213,6 +222,7 @@ export async function updateMachine(
     companyId?: string;
     lifecycleStatus?: LifecycleStatus;
     internalIp?: string | null;
+    country?: string | null;
     os?: string | null;
     notes?: string | null;
   },
@@ -233,6 +243,14 @@ export async function updateMachine(
       );
     }
 
+    let country: string | null | undefined = undefined;
+    if (input.country !== undefined) {
+      country = normalizeCountryCode(input.country);
+      if (input.country?.trim() && !country) {
+        throw new AppError("Country must be a valid ISO 3166-1 alpha-2 code");
+      }
+    }
+
     const machine = await tx.machine.update({
       where: { id },
       data: {
@@ -246,6 +264,7 @@ export async function updateMachine(
           input.internalIp === undefined
             ? undefined
             : input.internalIp?.trim() || null,
+        country,
         os: input.os === undefined ? undefined : input.os?.trim() || null,
         notes:
           input.notes === undefined ? undefined : input.notes?.trim() || null,
