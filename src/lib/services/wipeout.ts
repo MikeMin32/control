@@ -1,5 +1,6 @@
 import {
   ChecklistItemStatus,
+  ChecklistTemplateKind,
   ClosureReason,
   LifecycleStatus,
   ProxyAvailability,
@@ -7,39 +8,258 @@ import {
 import { prisma } from "../db";
 import { AppError } from "../errors";
 import { logActivity } from "../activity";
+import {
+  DEFAULT_WIPEOUT_ITEMS,
+  LEGACY_WIPEOUT_EMAIL_LABEL,
+  isRedDotWipeoutTask,
+  isSimilarEmailWipeoutTask,
+  normalizeChecklistLabel,
+} from "../checklist-defaults";
 
-const DEFAULT_ITEMS: { label: string; required: boolean }[] = [
-  { label: "Proxy subscription cancelled or renewal disabled.", required: true },
-  { label: "Proxy configuration removed.", required: true },
-  { label: "Browser/application profiles removed.", required: true },
-  {
-    label: "Associated email accounts removed or detached as appropriate.",
-    required: true,
-  },
-  { label: "VM deleted or prepared for reuse.", required: true },
-  { label: "Relevant network rules and access removed.", required: true },
-];
-
+/**
+ * Ensure the default wipeout template exists and includes current canonical
+ * tasks (email shutdown + RedDot) without duplicating on repeated runs.
+ * Existing closure snapshots are never mutated here.
+ */
 export async function ensureDefaultTemplate() {
-  const existing = await prisma.checklistTemplate.findFirst({
-    where: { isDefault: true },
-    include: { items: { orderBy: { sortOrder: "asc" } } },
-  });
-  if (existing) return existing;
-
-  return prisma.checklistTemplate.create({
-    data: {
-      name: "Default wipeout",
-      isDefault: true,
-      items: {
-        create: DEFAULT_ITEMS.map((item, i) => ({
-          label: item.label,
-          required: item.required,
-          sortOrder: i,
-        })),
-      },
+  let existing = await prisma.checklistTemplate.findFirst({
+    where: {
+      OR: [
+        { kind: ChecklistTemplateKind.WIPEOUT, isDefault: true },
+        { isDefault: true, kind: ChecklistTemplateKind.WIPEOUT },
+        { name: "Default wipeout" },
+      ],
     },
     include: { items: { orderBy: { sortOrder: "asc" } } },
+  });
+
+  if (!existing) {
+    existing = await prisma.checklistTemplate.findFirst({
+      where: { isDefault: true },
+      include: { items: { orderBy: { sortOrder: "asc" } } },
+    });
+  }
+
+  if (!existing) {
+    return prisma.checklistTemplate.create({
+      data: {
+        name: "Default wipeout",
+        kind: ChecklistTemplateKind.WIPEOUT,
+        isDefault: true,
+        items: {
+          create: DEFAULT_WIPEOUT_ITEMS.map((item, i) => ({
+            label: item.label,
+            description: item.description ?? null,
+            required: item.required,
+            sortOrder: i,
+          })),
+        },
+      },
+      include: { items: { orderBy: { sortOrder: "asc" } } },
+    });
+  }
+
+  // Normalize kind for legacy rows
+  if (existing.kind !== ChecklistTemplateKind.WIPEOUT || !existing.isDefault) {
+    existing = await prisma.checklistTemplate.update({
+      where: { id: existing.id },
+      data: { kind: ChecklistTemplateKind.WIPEOUT, isDefault: true },
+      include: { items: { orderBy: { sortOrder: "asc" } } },
+    });
+  }
+
+  const byNorm = new Map(
+    existing.items.map((i) => [normalizeChecklistLabel(i.label), i]),
+  );
+
+  // Replace legacy generic email task on the TEMPLATE only (not snapshots)
+  const legacyEmail = existing.items.find(
+    (i) =>
+      normalizeChecklistLabel(i.label) ===
+      normalizeChecklistLabel(LEGACY_WIPEOUT_EMAIL_LABEL),
+  );
+  const canonicalEmail = DEFAULT_WIPEOUT_ITEMS.find((i) =>
+    isSimilarEmailWipeoutTask(i.label),
+  )!;
+  if (legacyEmail) {
+    await prisma.checklistTemplateItem.update({
+      where: { id: legacyEmail.id },
+      data: {
+        label: canonicalEmail.label,
+        description: canonicalEmail.description ?? null,
+      },
+    });
+    byNorm.delete(normalizeChecklistLabel(LEGACY_WIPEOUT_EMAIL_LABEL));
+    byNorm.set(normalizeChecklistLabel(canonicalEmail.label), legacyEmail);
+  }
+
+  let maxOrder = existing.items.reduce((m, i) => Math.max(m, i.sortOrder), -1);
+  for (const item of DEFAULT_WIPEOUT_ITEMS) {
+    const key = normalizeChecklistLabel(item.label);
+    if (byNorm.has(key)) {
+      const row = byNorm.get(key)!;
+      if (item.description && row.description !== item.description) {
+        await prisma.checklistTemplateItem.update({
+          where: { id: row.id },
+          data: { description: item.description },
+        });
+      }
+      continue;
+    }
+    // Skip adding canonical email if a similar email task already exists
+    if (
+      isSimilarEmailWipeoutTask(item.label) &&
+      existing.items.some((i) => isSimilarEmailWipeoutTask(i.label))
+    ) {
+      continue;
+    }
+    if (
+      isRedDotWipeoutTask(item.label) &&
+      existing.items.some((i) => isRedDotWipeoutTask(i.label))
+    ) {
+      continue;
+    }
+    maxOrder += 1;
+    await prisma.checklistTemplateItem.create({
+      data: {
+        templateId: existing.id,
+        label: item.label,
+        description: item.description ?? null,
+        required: item.required,
+        sortOrder: maxOrder,
+      },
+    });
+  }
+
+  return prisma.checklistTemplate.findUniqueOrThrow({
+    where: { id: existing.id },
+    include: { items: { orderBy: { sortOrder: "asc" } } },
+  });
+}
+
+export type MissingWipeoutTask = {
+  label: string;
+  description: string | null;
+  required: boolean;
+  similarExistingLabel: string | null;
+};
+
+/** Preview template tasks not present on an open checklist (no mutation). */
+export async function previewMissingWipeoutTasks(
+  checklistId: string,
+): Promise<MissingWipeoutTask[]> {
+  const checklist = await prisma.closureChecklist.findUnique({
+    where: { id: checklistId },
+    include: { items: true },
+  });
+  if (!checklist) throw new AppError("Checklist not found", "NOT_FOUND", 404);
+  if (checklist.completedAt) {
+    throw new AppError(
+      "Completed wipeouts cannot be modified",
+      "CLOSURE_DONE",
+      409,
+    );
+  }
+
+  const template = await ensureDefaultTemplate();
+  const missing: MissingWipeoutTask[] = [];
+
+  for (const tItem of template.items) {
+    const exact = checklist.items.some(
+      (i) =>
+        normalizeChecklistLabel(i.label) ===
+        normalizeChecklistLabel(tItem.label),
+    );
+    if (exact) continue;
+
+    let similar: string | null = null;
+    if (isSimilarEmailWipeoutTask(tItem.label)) {
+      const hit = checklist.items.find((i) => isSimilarEmailWipeoutTask(i.label));
+      if (hit) similar = hit.label;
+    }
+    if (isRedDotWipeoutTask(tItem.label)) {
+      const hit = checklist.items.find((i) => isRedDotWipeoutTask(i.label));
+      if (hit) similar = hit.label;
+    }
+
+    missing.push({
+      label: tItem.label,
+      description: tItem.description,
+      required: tItem.required,
+      similarExistingLabel: similar,
+    });
+  }
+
+  return missing;
+}
+
+/**
+ * Add selected missing template tasks to an open checklist.
+ * For similar email tasks, omit from selection to keep the existing wording.
+ */
+export async function addMissingWipeoutTasks(
+  checklistId: string,
+  labels: string[],
+  actorId: string,
+) {
+  const wanted = new Set(labels.map((l) => normalizeChecklistLabel(l)));
+  if (wanted.size === 0) {
+    throw new AppError("Select at least one task to add");
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const checklist = await tx.closureChecklist.findUnique({
+      where: { id: checklistId },
+      include: { items: true },
+    });
+    if (!checklist) throw new AppError("Checklist not found", "NOT_FOUND", 404);
+    if (checklist.completedAt) {
+      throw new AppError(
+        "Completed wipeouts cannot be modified",
+        "CLOSURE_DONE",
+        409,
+      );
+    }
+
+    const template = await ensureDefaultTemplate();
+    const maxOrder = checklist.items.reduce(
+      (m, i) => Math.max(m, i.sortOrder),
+      -1,
+    );
+    let nextOrder = maxOrder + 1;
+    const created = [];
+
+    for (const tItem of template.items) {
+      const key = normalizeChecklistLabel(tItem.label);
+      if (!wanted.has(key)) continue;
+      const already = checklist.items.some(
+        (i) => normalizeChecklistLabel(i.label) === key,
+      );
+      if (already) continue;
+      const item = await tx.closureChecklistItem.create({
+        data: {
+          checklistId,
+          label: tItem.label,
+          description: tItem.description,
+          required: tItem.required,
+          sortOrder: nextOrder++,
+          status: ChecklistItemStatus.PENDING,
+        },
+      });
+      created.push(item);
+    }
+
+    if (created.length > 0) {
+      await logActivity(tx, {
+        machineId: checklist.machineId,
+        actorId,
+        type: "closure.tasks_added",
+        message: `Added ${created.length} missing wipeout template task(s)`,
+        metadata: { labels: created.map((c) => c.label) },
+      });
+    }
+
+    return created;
   });
 }
 
@@ -61,10 +281,16 @@ export async function startClosure(
       throw new AppError("Closure already started", "CLOSURE_EXISTS", 409);
     }
 
-    const template = await tx.checklistTemplate.findFirst({
-      where: { isDefault: true },
+    let template = await tx.checklistTemplate.findFirst({
+      where: { kind: ChecklistTemplateKind.WIPEOUT, isDefault: true },
       include: { items: { orderBy: { sortOrder: "asc" } } },
     });
+    if (!template) {
+      template = await tx.checklistTemplate.findFirst({
+        where: { isDefault: true },
+        include: { items: { orderBy: { sortOrder: "asc" } } },
+      });
+    }
     if (!template || template.items.length === 0) {
       throw new AppError("No wipeout checklist template configured");
     }
@@ -95,6 +321,7 @@ export async function startClosure(
         items: {
           create: template.items.map((item) => ({
             label: item.label,
+            description: item.description,
             required: item.required,
             sortOrder: item.sortOrder,
             status: ChecklistItemStatus.PENDING,

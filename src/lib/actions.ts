@@ -26,6 +26,7 @@ import { toActionResult } from "./errors";
 import * as machines from "./services/machines";
 import * as proxies from "./services/proxies";
 import * as wipeout from "./services/wipeout";
+import * as setup from "./services/setup";
 import * as settings from "./services/settings";
 import { probeProxmox } from "./proxmox";
 
@@ -286,6 +287,75 @@ export async function completeClosureAction(machineId: string) {
   }
 }
 
+export async function previewMissingWipeoutTasksAction(checklistId: string) {
+  try {
+    await assertSameOrigin();
+    await requireUser();
+    const missing = await wipeout.previewMissingWipeoutTasks(checklistId);
+    return { ok: true as const, missing };
+  } catch (err) {
+    return toActionResult(err);
+  }
+}
+
+export async function addMissingWipeoutTasksAction(
+  checklistId: string,
+  labels: string[],
+) {
+  try {
+    await assertSameOrigin();
+    const user = await requireUser();
+    await wipeout.addMissingWipeoutTasks(checklistId, labels, user.id);
+    revalidatePath("/wipeout");
+    return { ok: true as const };
+  } catch (err) {
+    return toActionResult(err);
+  }
+}
+
+export async function startSetupAction(machineId: string) {
+  try {
+    await assertSameOrigin();
+    const user = await requireUser();
+    await setup.startSetupChecklist(machineId, user.id);
+    revalidatePath("/machines");
+    return { ok: true as const };
+  } catch (err) {
+    return toActionResult(err);
+  }
+}
+
+export async function updateSetupItemAction(
+  itemId: string,
+  input: {
+    status: ChecklistItemStatus;
+    notes?: string;
+    naReason?: string;
+  },
+) {
+  try {
+    await assertSameOrigin();
+    const user = await requireUser();
+    await setup.updateSetupItem(itemId, input, user.id);
+    revalidatePath("/machines");
+    return { ok: true as const };
+  } catch (err) {
+    return toActionResult(err);
+  }
+}
+
+export async function finishSetupAction(machineId: string) {
+  try {
+    await assertSameOrigin();
+    const user = await requireUser();
+    await setup.finishSetup(machineId, user.id);
+    revalidatePath("/machines");
+    return { ok: true as const };
+  } catch (err) {
+    return toActionResult(err);
+  }
+}
+
 export async function createServerAction(name: string, notes?: string) {
   try {
     await assertSameOrigin();
@@ -351,7 +421,13 @@ export async function changePasswordAction(
 
 export async function updateTemplateAction(
   templateId: string,
-  items: { label: string; required: boolean; sortOrder: number }[],
+  items: {
+    label: string;
+    required: boolean;
+    sortOrder: number;
+    section?: string | null;
+    description?: string | null;
+  }[],
 ) {
   try {
     await assertSameOrigin();

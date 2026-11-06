@@ -1,7 +1,9 @@
+import { ChecklistTemplateKind } from "@prisma/client";
 import { prisma } from "../db";
 import { AppError } from "../errors";
 import { hashPassword, verifyPassword } from "../auth";
 import { ensureDefaultTemplate } from "./wipeout";
+import { ensureDefaultSetupTemplate } from "./setup";
 
 export async function getOrCreateSettings() {
   const existing = await prisma.appSettings.findUnique({ where: { id: 1 } });
@@ -85,15 +87,34 @@ export async function getTemplateEditor() {
   return ensureDefaultTemplate();
 }
 
+export async function getSetupTemplateEditor() {
+  return ensureDefaultSetupTemplate();
+}
+
 export async function updateTemplateItems(
   templateId: string,
-  items: { id?: string; label: string; required: boolean; sortOrder: number }[],
+  items: {
+    id?: string;
+    label: string;
+    required: boolean;
+    sortOrder: number;
+    section?: string | null;
+    description?: string | null;
+  }[],
 ) {
   return prisma.$transaction(async (tx) => {
     const template = await tx.checklistTemplate.findUnique({
       where: { id: templateId },
     });
     if (!template) throw new AppError("Template not found", "NOT_FOUND", 404);
+
+    if (template.kind === ChecklistTemplateKind.SETUP) {
+      for (const item of items) {
+        if (!item.section?.trim()) {
+          throw new AppError("Setup template items require a section");
+        }
+      }
+    }
 
     await tx.checklistTemplateItem.deleteMany({ where: { templateId } });
     await tx.checklistTemplateItem.createMany({
@@ -102,6 +123,8 @@ export async function updateTemplateItems(
         label: item.label.trim(),
         required: item.required,
         sortOrder: item.sortOrder ?? i,
+        section: item.section?.trim() || null,
+        description: item.description?.trim() || null,
       })),
     });
 

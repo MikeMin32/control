@@ -1,4 +1,6 @@
 import {
+  ChecklistItemStatus,
+  ChecklistTemplateKind,
   LifecycleStatus,
   type Prisma,
 } from "@prisma/client";
@@ -6,6 +8,7 @@ import { prisma } from "../db";
 import { AppError } from "../errors";
 import { logActivity } from "../activity";
 import { normalizeCountryCode } from "../countries";
+import { ensureDefaultSetupTemplate } from "./setup";
 
 export type MachineListParams = {
   serverId?: string | null;
@@ -88,6 +91,7 @@ export async function listMachines(params: MachineListParams) {
           take: 1,
         },
         closure: { include: { items: true } },
+        setupChecklist: { include: { items: true } },
       },
       orderBy,
       skip: (page - 1) * pageSize,
@@ -113,6 +117,12 @@ export async function getMachine(id: string) {
         orderBy: { createdAt: "desc" },
       },
       closure: {
+        include: {
+          items: { orderBy: { sortOrder: "asc" } },
+          completedBy: true,
+        },
+      },
+      setupChecklist: {
         include: {
           items: { orderBy: { sortOrder: "asc" } },
           completedBy: true,
@@ -174,6 +184,9 @@ export async function createMachine(
     throw new AppError("Country must be a valid ISO 3166-1 alpha-2 code");
   }
 
+  // New VMs always start Preparing with a setup checklist snapshot
+  await ensureDefaultSetupTemplate();
+
   return prisma.$transaction(async (tx) => {
     await assertNoActiveConflict(tx, input.serverId, input.vmid);
     let machine;
@@ -184,7 +197,7 @@ export async function createMachine(
           displayName: input.displayName?.trim() || null,
           serverId: input.serverId,
           companyId: input.companyId,
-          lifecycleStatus: input.lifecycleStatus ?? LifecycleStatus.PREPARING,
+          lifecycleStatus: LifecycleStatus.PREPARING,
           internalIp: input.internalIp?.trim() || null,
           country,
           os: input.os?.trim() || null,
@@ -205,11 +218,45 @@ export async function createMachine(
       }
       throw err;
     }
+
+    const template = await tx.checklistTemplate.findFirst({
+      where: { kind: ChecklistTemplateKind.SETUP, isDefault: true },
+      include: { items: { orderBy: { sortOrder: "asc" } } },
+    });
+    if (!template || template.items.length === 0) {
+      throw new AppError("No setup checklist template configured");
+    }
+
+    await tx.setupChecklist.create({
+      data: {
+        machineId: machine.id,
+        templateName: template.name,
+        actorId,
+        items: {
+          create: template.items.map((item) => ({
+            section: item.section || "VM",
+            label: item.label,
+            description: item.description,
+            required: item.required,
+            sortOrder: item.sortOrder,
+            status: ChecklistItemStatus.PENDING,
+          })),
+        },
+      },
+    });
+
     await logActivity(tx, {
       machineId: machine.id,
       actorId,
       type: "machine.created",
       message: `Created VM ${machine.vmid}`,
+    });
+    await logActivity(tx, {
+      machineId: machine.id,
+      actorId,
+      type: "setup.started",
+      message: "Started VM setup checklist",
+      metadata: { templateName: template.name },
     });
     return machine;
   });
@@ -229,7 +276,10 @@ export async function updateMachine(
   actorId: string,
 ) {
   return prisma.$transaction(async (tx) => {
-    const current = await tx.machine.findUnique({ where: { id } });
+    const current = await tx.machine.findUnique({
+      where: { id },
+      include: { setupChecklist: { include: { items: true } } },
+    });
     if (!current) throw new AppError("Machine not found", "NOT_FOUND", 404);
     if (current.lifecycleStatus === LifecycleStatus.ARCHIVED) {
       throw new AppError("Archived machines are read-only", "ARCHIVED", 409);
@@ -240,6 +290,18 @@ export async function updateMachine(
       throw new AppError(
         "Use complete closure to archive a machine",
         "INVALID_STATUS",
+      );
+    }
+
+    if (
+      input.lifecycleStatus === LifecycleStatus.ACTIVE &&
+      current.setupChecklist &&
+      !current.setupChecklist.completedAt
+    ) {
+      throw new AppError(
+        "Finish the setup checklist before marking Active",
+        "SETUP_INCOMPLETE",
+        409,
       );
     }
 

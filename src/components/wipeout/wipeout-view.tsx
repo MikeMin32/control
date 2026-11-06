@@ -21,11 +21,15 @@ import { Dialog } from "@/components/ui/dialog";
 import { Field, Input, Textarea } from "@/components/ui/input";
 import {
   addCustomChecklistItemAction,
+  addMissingWipeoutTasksAction,
   completeClosureAction,
+  previewMissingWipeoutTasksAction,
   updateChecklistItemAction,
 } from "@/lib/actions";
 import { CLOSURE_REASON_LABELS } from "@/lib/labels";
 import { cn, formatDate } from "@/lib/utils";
+import { ProgressBar } from "@/components/ui/progress-bar";
+import type { MissingWipeoutTask } from "@/lib/services/wipeout";
 
 type Row = Machine & {
   server: Server;
@@ -53,35 +57,6 @@ function canComplete(items: ClosureChecklistItem[]) {
   return requiredRemaining(items) === 0;
 }
 
-function ProgressBar({
-  value,
-  max,
-  className,
-}: {
-  value: number;
-  max: number;
-  className?: string;
-}) {
-  const pct = max === 0 ? 0 : Math.round((value / max) * 100);
-  return (
-    <div
-      className={cn(
-        "h-1.5 w-full overflow-hidden rounded-full bg-sidebar",
-        className,
-      )}
-      role="progressbar"
-      aria-valuenow={value}
-      aria-valuemin={0}
-      aria-valuemax={max}
-    >
-      <div
-        className="h-full rounded-full bg-mint-strong transition-[width] duration-300 motion-reduce:transition-none"
-        style={{ width: `${pct}%` }}
-      />
-    </div>
-  );
-}
-
 export function WipeoutView({
   rows,
   timezone,
@@ -103,6 +78,11 @@ export function WipeoutView({
   const [noteDraft, setNoteDraft] = useState("");
   const [naItem, setNaItem] = useState<ClosureChecklistItem | null>(null);
   const [naDraft, setNaDraft] = useState("");
+  const [missingOpen, setMissingOpen] = useState(false);
+  const [missing, setMissing] = useState<MissingWipeoutTask[]>([]);
+  const [missingSelected, setMissingSelected] = useState<Record<string, boolean>>(
+    {},
+  );
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   const closure = selected?.closure ?? null;
@@ -390,6 +370,11 @@ export function WipeoutView({
                             >
                               {item.label}
                             </div>
+                            {item.description ? (
+                              <p className="mt-0.5 text-xs text-muted">
+                                {item.description}
+                              </p>
+                            ) : null}
                             <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-muted">
                               {item.required ? (
                                 <span>Required</span>
@@ -510,38 +495,66 @@ export function WipeoutView({
             </ul>
 
             {!readOnly ? (
-              <form
-                className="flex flex-wrap gap-2 border-t border-line pt-3"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const fd = new FormData(e.currentTarget);
-                  startTransition(async () => {
-                    const res = await addCustomChecklistItemAction(
-                      selected.closure!.id,
-                      String(fd.get("label")),
-                      fd.get("required") === "on",
-                    );
-                    if (!res.ok) setError(res.error);
-                    else {
-                      (e.target as HTMLFormElement).reset();
-                      router.refresh();
-                    }
-                  });
-                }}
-              >
-                <Input
-                  name="label"
-                  placeholder="Custom item"
-                  className="min-w-[160px] flex-1"
-                />
-                <label className="flex items-center gap-1 text-xs text-muted">
-                  <input type="checkbox" name="required" defaultChecked />
-                  Required
-                </label>
-                <Button type="submit" variant="outline" disabled={pending}>
-                  Add
+              <div className="space-y-3 border-t border-line pt-3">
+                <Button
+                  variant="outline"
+                  disabled={pending}
+                  onClick={() => {
+                    startTransition(async () => {
+                      const res = await previewMissingWipeoutTasksAction(
+                        selected.closure!.id,
+                      );
+                      if (!res.ok) {
+                        setError(res.error);
+                        return;
+                      }
+                      const list = res.missing || [];
+                      setMissing(list);
+                      const sel: Record<string, boolean> = {};
+                      for (const m of list) {
+                        // Default: select new tasks; leave similar email unchecked (keep existing)
+                        sel[m.label] = !m.similarExistingLabel;
+                      }
+                      setMissingSelected(sel);
+                      setMissingOpen(true);
+                    });
+                  }}
+                >
+                  Add missing template tasks
                 </Button>
-              </form>
+                <form
+                  className="flex flex-wrap gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const fd = new FormData(e.currentTarget);
+                    startTransition(async () => {
+                      const res = await addCustomChecklistItemAction(
+                        selected.closure!.id,
+                        String(fd.get("label")),
+                        fd.get("required") === "on",
+                      );
+                      if (!res.ok) setError(res.error);
+                      else {
+                        (e.target as HTMLFormElement).reset();
+                        router.refresh();
+                      }
+                    });
+                  }}
+                >
+                  <Input
+                    name="label"
+                    placeholder="Custom item"
+                    className="min-w-[160px] flex-1"
+                  />
+                  <label className="flex items-center gap-1 text-xs text-muted">
+                    <input type="checkbox" name="required" defaultChecked />
+                    Required
+                  </label>
+                  <Button type="submit" variant="outline" disabled={pending}>
+                    Add
+                  </Button>
+                </form>
+              </div>
             ) : null}
 
             {error && !naItem && !noteItem ? (
@@ -633,6 +646,85 @@ export function WipeoutView({
             required
           />
         </Field>
+      </Dialog>
+
+      <Dialog
+        open={missingOpen}
+        onClose={() => setMissingOpen(false)}
+        title="Add missing template tasks"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setMissingOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              disabled={
+                pending ||
+                !Object.values(missingSelected).some(Boolean)
+              }
+              onClick={() => {
+                const labels = missing
+                  .filter((m) => missingSelected[m.label])
+                  .map((m) => m.label);
+                if (!selected?.closure || labels.length === 0) return;
+                startTransition(async () => {
+                  const res = await addMissingWipeoutTasksAction(
+                    selected.closure!.id,
+                    labels,
+                  );
+                  if (!res.ok) setError(res.error);
+                  else {
+                    setMissingOpen(false);
+                    router.refresh();
+                  }
+                });
+              }}
+            >
+              Add selected
+            </Button>
+          </>
+        }
+      >
+        {missing.length === 0 ? (
+          <p className="text-sm text-muted">
+            This open checklist already includes every current template task.
+          </p>
+        ) : (
+          <ul className="space-y-3">
+            {missing.map((m) => (
+              <li key={m.label} className="rounded-slate border border-line p-3">
+                <label className="flex items-start gap-3 text-sm">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={Boolean(missingSelected[m.label])}
+                    onChange={(e) =>
+                      setMissingSelected((s) => ({
+                        ...s,
+                        [m.label]: e.target.checked,
+                      }))
+                    }
+                  />
+                  <span>
+                    <span className="font-medium">{m.label}</span>
+                    {m.description ? (
+                      <span className="mt-0.5 block text-xs text-muted">
+                        {m.description}
+                      </span>
+                    ) : null}
+                    {m.similarExistingLabel ? (
+                      <span className="mt-1 block text-xs text-muted">
+                        Similar task already on checklist: “
+                        {m.similarExistingLabel}”. Leave unchecked to keep it.
+                      </span>
+                    ) : null}
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        )}
       </Dialog>
     </div>
   );

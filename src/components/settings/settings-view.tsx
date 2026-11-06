@@ -2,9 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { ChecklistTemplate, ChecklistTemplateItem, Company, Server } from "@prisma/client";
+import type {
+  ChecklistTemplate,
+  ChecklistTemplateItem,
+  Company,
+  Server,
+} from "@prisma/client";
 import { Button } from "@/components/ui/button";
-import { Field, Input } from "@/components/ui/input";
+import { Field, Input, Select } from "@/components/ui/input";
 import {
   changePasswordAction,
   createCompanyAction,
@@ -13,18 +18,29 @@ import {
   updateTemplateAction,
   updateTimezoneAction,
 } from "@/lib/actions";
+import { SETUP_SECTIONS } from "@/lib/checklist-defaults";
 import type { ProxmoxStatus } from "@/lib/proxmox";
+
+type TemplateItemDraft = {
+  label: string;
+  required: boolean;
+  sortOrder: number;
+  section?: string | null;
+  description?: string | null;
+};
 
 export function SettingsView({
   servers,
   companies,
   template,
+  setupTemplate,
   timezone,
   proxmox,
 }: {
   servers: Server[];
   companies: Company[];
   template: ChecklistTemplate & { items: ChecklistTemplateItem[] };
+  setupTemplate: ChecklistTemplate & { items: ChecklistTemplateItem[] };
   timezone: string;
   proxmox: ProxmoxStatus;
 }) {
@@ -32,11 +48,21 @@ export function SettingsView({
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [items, setItems] = useState(
+  const [items, setItems] = useState<TemplateItemDraft[]>(
     template.items.map((i) => ({
       label: i.label,
       required: i.required,
       sortOrder: i.sortOrder,
+      description: i.description,
+    })),
+  );
+  const [setupItems, setSetupItems] = useState<TemplateItemDraft[]>(
+    setupTemplate.items.map((i) => ({
+      label: i.label,
+      required: i.required,
+      sortOrder: i.sortOrder,
+      section: i.section,
+      description: i.description,
     })),
   );
 
@@ -52,7 +78,8 @@ export function SettingsView({
       <div>
         <h1 className="page-title">Settings</h1>
         <p className="page-subtitle">
-          Servers, companies, wipeout template, account, and optional Proxmox.
+          Servers, companies, checklist templates, account, and optional
+          Proxmox.
         </p>
       </div>
 
@@ -182,41 +209,14 @@ export function SettingsView({
       <Section title="Wipeout checklist template">
         <p className="mb-3 text-xs text-muted">
           Edits apply to new closures only. Existing checklists keep their
-          snapshot.
+          snapshot. Open wipeouts can add missing tasks explicitly.
         </p>
-        <div className="space-y-2">
-          {items.map((item, idx) => (
-            <div key={idx} className="flex gap-2">
-              <Input
-                value={item.label}
-                onChange={(e) => {
-                  const next = [...items];
-                  next[idx] = { ...item, label: e.target.value };
-                  setItems(next);
-                }}
-              />
-              <label className="flex items-center gap-1 text-xs text-muted">
-                <input
-                  type="checkbox"
-                  checked={item.required}
-                  onChange={(e) => {
-                    const next = [...items];
-                    next[idx] = { ...item, required: e.target.checked };
-                    setItems(next);
-                  }}
-                />
-                Req
-              </label>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => setItems(items.filter((_, i) => i !== idx))}
-              >
-                Remove
-              </Button>
-            </div>
-          ))}
-        </div>
+        <TemplateItemsEditor
+          items={items}
+          setItems={setItems}
+          showSection={false}
+          showDescription
+        />
         <div className="mt-3 flex gap-2">
           <Button
             variant="outline"
@@ -227,6 +227,7 @@ export function SettingsView({
                   label: "New item",
                   required: true,
                   sortOrder: items.length,
+                  description: "",
                 },
               ])
             }
@@ -244,13 +245,64 @@ export function SettingsView({
                 );
                 if (!res.ok) setError(res.error);
                 else {
-                  setMessage("Template saved");
+                  setMessage("Wipeout template saved");
                   router.refresh();
                 }
               });
             }}
           >
-            Save template
+            Save wipeout template
+          </Button>
+        </div>
+      </Section>
+
+      <Section title="VM setup checklist template">
+        <p className="mb-3 text-xs text-muted">
+          Separate from wipeout. Sections: VM, Domain, PurelyMail. Edits apply
+          to new setup checklists only.
+        </p>
+        <TemplateItemsEditor
+          items={setupItems}
+          setItems={setSetupItems}
+          showSection
+          showDescription
+        />
+        <div className="mt-3 flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() =>
+              setSetupItems([
+                ...setupItems,
+                {
+                  label: "New item",
+                  required: true,
+                  sortOrder: setupItems.length,
+                  section: "VM",
+                  description: "",
+                },
+              ])
+            }
+          >
+            Add item
+          </Button>
+          <Button
+            variant="primary"
+            disabled={pending}
+            onClick={() => {
+              startTransition(async () => {
+                const res = await updateTemplateAction(
+                  setupTemplate.id,
+                  setupItems.map((item, i) => ({ ...item, sortOrder: i })),
+                );
+                if (!res.ok) setError(res.error);
+                else {
+                  setMessage("Setup template saved");
+                  router.refresh();
+                }
+              });
+            }}
+          >
+            Save setup template
           </Button>
         </div>
       </Section>
@@ -296,6 +348,116 @@ export function SettingsView({
           {error}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+function TemplateItemsEditor({
+  items,
+  setItems,
+  showSection,
+  showDescription,
+}: {
+  items: TemplateItemDraft[];
+  setItems: (items: TemplateItemDraft[]) => void;
+  showSection?: boolean;
+  showDescription?: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      {items.map((item, idx) => (
+        <div
+          key={idx}
+          className="space-y-2 rounded-slate border border-line p-3"
+        >
+          <div className="flex flex-wrap gap-2">
+            {showSection ? (
+              <Select
+                className="w-36"
+                value={item.section || "VM"}
+                onChange={(e) => {
+                  const next = [...items];
+                  next[idx] = { ...item, section: e.target.value };
+                  setItems(next);
+                }}
+              >
+                {SETUP_SECTIONS.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </Select>
+            ) : null}
+            <Input
+              className="min-w-[180px] flex-1"
+              value={item.label}
+              onChange={(e) => {
+                const next = [...items];
+                next[idx] = { ...item, label: e.target.value };
+                setItems(next);
+              }}
+            />
+            <label className="flex items-center gap-1 text-xs text-muted">
+              <input
+                type="checkbox"
+                checked={item.required}
+                onChange={(e) => {
+                  const next = [...items];
+                  next[idx] = { ...item, required: e.target.checked };
+                  setItems(next);
+                }}
+              />
+              Req
+            </label>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setItems(items.filter((_, i) => i !== idx))}
+            >
+              Remove
+            </Button>
+          </div>
+          {showDescription ? (
+            <Input
+              placeholder="Optional description"
+              value={item.description || ""}
+              onChange={(e) => {
+                const next = [...items];
+                next[idx] = { ...item, description: e.target.value };
+                setItems(next);
+              }}
+            />
+          ) : null}
+          <div className="flex gap-1">
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={idx === 0}
+              onClick={() => {
+                if (idx === 0) return;
+                const next = [...items];
+                [next[idx - 1], next[idx]] = [next[idx], next[idx - 1]];
+                setItems(next);
+              }}
+            >
+              Up
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={idx === items.length - 1}
+              onClick={() => {
+                if (idx >= items.length - 1) return;
+                const next = [...items];
+                [next[idx], next[idx + 1]] = [next[idx + 1], next[idx]];
+                setItems(next);
+              }}
+            >
+              Down
+            </Button>
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

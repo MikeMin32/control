@@ -33,8 +33,10 @@ import {
   migrateMachineAction,
   rotateProxyAction,
   startClosureAction,
+  startSetupAction,
   updateMachineAction,
 } from "@/lib/actions";
+import { SetupChecklistPanel } from "@/components/setup/setup-checklist-panel";
 import { countryName } from "@/lib/countries";
 import {
   LIFECYCLE_DOT,
@@ -48,6 +50,9 @@ import {
   formatDate,
   isRenewalOverdue,
 } from "@/lib/utils";
+import type { SetupChecklist, SetupChecklistItem } from "@prisma/client";
+
+type SetupBundle = SetupChecklist & { items: SetupChecklistItem[] };
 
 type MachineRow = Machine & {
   server: Server;
@@ -57,6 +62,7 @@ type MachineRow = Machine & {
     id: string;
     completedAt: Date | string | null;
   } | null;
+  setupChecklist?: SetupBundle | null;
 };
 
 type DetailMachine = MachineRow & {
@@ -83,6 +89,7 @@ type DetailMachine = MachineRow & {
     completedAt?: Date | string | null;
     items: { id: string; label: string; status: string; required: boolean }[];
   } | null;
+  setupChecklist: SetupBundle | null;
 };
 
 export function MachinesView({
@@ -98,6 +105,7 @@ export function MachinesView({
   initialServerId,
   initialQ,
   initialStatus,
+  initialTab,
   serverCounts,
   allCount,
   proxmox,
@@ -114,6 +122,7 @@ export function MachinesView({
   initialServerId: string;
   initialQ: string;
   initialStatus: string;
+  initialTab: string;
   serverCounts: Record<string, number>;
   allCount: number;
   proxmox: ProxmoxStatus;
@@ -124,7 +133,13 @@ export function MachinesView({
   const [addOpen, setAddOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copyToast, setCopyToast] = useState<string | null>(null);
-  const [tab, setTab] = useState<"overview" | "proxy" | "activity">("overview");
+  const [tab, setTab] = useState<"overview" | "setup" | "proxy" | "activity">(
+    initialTab === "setup" ||
+      initialTab === "proxy" ||
+      initialTab === "activity"
+      ? initialTab
+      : "overview",
+  );
   const [rotateOpen, setRotateOpen] = useState(false);
   const [rotateMachineId, setRotateMachineId] = useState<string | null>(null);
   const [migrateOpen, setMigrateOpen] = useState(false);
@@ -168,10 +183,32 @@ export function MachinesView({
     router.push(`/machines?${sp.toString()}`);
   }
 
-  function openMachine(id: string) {
+  function openMachine(id: string, nextTab?: string) {
     const sp = new URLSearchParams(searchParams.toString());
     sp.set("id", id);
+    if (nextTab) sp.set("tab", nextTab);
+    else sp.delete("tab");
     router.push(`/machines?${sp.toString()}`);
+    if (nextTab === "setup" || nextTab === "proxy" || nextTab === "activity") {
+      setTab(nextTab);
+    } else if (!nextTab) {
+      setTab("overview");
+    }
+  }
+
+  function setupProgress(m: MachineRow) {
+    const items = m.setupChecklist?.items ?? [];
+    if (!items.length) return null;
+    const done = items.filter(
+      (i) =>
+        i.status === "COMPLETED" ||
+        (i.status === "NOT_APPLICABLE" && Boolean(i.naReason?.trim())),
+    ).length;
+    return { done, total: items.length, finished: Boolean(m.setupChecklist?.completedAt) };
+  }
+
+  function hasOpenSetup(m: MachineRow) {
+    return Boolean(m.setupChecklist && !m.setupChecklist.completedAt);
   }
 
   function closeDrawer() {
@@ -256,6 +293,27 @@ export function MachinesView({
         return;
       }
       router.push(`/wipeout?id=${m.id}`);
+      router.refresh();
+    });
+  }
+
+  function continueOrStartSetup(m: MachineRow) {
+    setRowMenu(null);
+    if (hasOpenSetup(m)) {
+      openMachine(m.id, "setup");
+      return;
+    }
+    if (m.lifecycleStatus !== "PREPARING" || m.setupChecklist) {
+      setError("Setup can only be started for Preparing VMs without a checklist");
+      return;
+    }
+    startTransition(async () => {
+      const res = await startSetupAction(m.id);
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      openMachine(m.id, "setup");
       router.refresh();
     });
   }
@@ -418,6 +476,8 @@ export function MachinesView({
                 const overdue = isRenewalOverdue(current?.renewalDate ?? null);
                 const rotateBlocked = rotateDisabledReason(m);
                 const wipeoutContinue = hasOpenWipeout(m);
+                const setup = setupProgress(m);
+                const setupContinue = hasOpenSetup(m);
                 return (
                   <tr
                     key={m.id}
@@ -445,11 +505,18 @@ export function MachinesView({
                       <CountryFlag code={m.country} />
                     </td>
                     <td className="px-4 py-3.5">
-                      <StatusPill
-                        label={LIFECYCLE_LABELS[m.lifecycleStatus]}
-                        dotClass={LIFECYCLE_DOT[m.lifecycleStatus]}
-                        pillClass={LIFECYCLE_PILL[m.lifecycleStatus]}
-                      />
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <StatusPill
+                          label={LIFECYCLE_LABELS[m.lifecycleStatus]}
+                          dotClass={LIFECYCLE_DOT[m.lifecycleStatus]}
+                          pillClass={LIFECYCLE_PILL[m.lifecycleStatus]}
+                        />
+                        {setup && !setup.finished ? (
+                          <span className="text-[11px] tabular-nums text-muted">
+                            {setup.done}/{setup.total}
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="px-4 py-3.5">
                       {m.internalIp ? (
@@ -545,6 +612,20 @@ export function MachinesView({
                               >
                                 Rotate IP
                               </button>
+                              {setupContinue ||
+                              (m.lifecycleStatus === "PREPARING" &&
+                                !m.setupChecklist) ? (
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  className="block w-full px-3 py-2 text-sm hover:bg-sidebar"
+                                  onClick={() => continueOrStartSetup(m)}
+                                >
+                                  {setupContinue
+                                    ? "Continue setup"
+                                    : "Start setup checklist"}
+                                </button>
+                              ) : null}
                               <button
                                 type="button"
                                 role="menuitem"
@@ -656,7 +737,7 @@ export function MachinesView({
               }
               setAddOpen(false);
               router.refresh();
-              if (res.id) openMachine(res.id);
+              if (res.id) openMachine(res.id, "setup");
             });
           }}
         >
@@ -694,15 +775,12 @@ export function MachinesView({
             <Input name="newCompany" placeholder="New company name" />
           </Field>
           <Field label="Lifecycle">
-            <Select name="lifecycleStatus" defaultValue="PREPARING">
-              {Object.entries(LIFECYCLE_LABELS)
-                .filter(([k]) => !["ARCHIVED", "BURNED"].includes(k))
-                .map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v}
-                  </option>
-                ))}
+            <Select name="lifecycleStatus" defaultValue="PREPARING" disabled>
+              <option value="PREPARING">Preparing</option>
             </Select>
+            <p className="mt-1 text-xs text-muted">
+              New VMs start Preparing with a setup checklist.
+            </p>
           </Field>
           <Field label="Country">
             <CountrySelect name="country" defaultValue="" />
@@ -837,6 +915,7 @@ export function MachinesView({
               {(
                 [
                   ["overview", "Overview"],
+                  ["setup", "Setup"],
                   ["proxy", "Proxy history"],
                   ["activity", "Activity"],
                 ] as const
@@ -849,7 +928,13 @@ export function MachinesView({
                       ? "border-b-2 border-ink font-medium text-ink"
                       : "text-muted"
                   }`}
-                  onClick={() => setTab(id)}
+                  onClick={() => {
+                    setTab(id);
+                    const sp = new URLSearchParams(searchParams.toString());
+                    if (id === "overview") sp.delete("tab");
+                    else sp.set("tab", id);
+                    router.replace(`/machines?${sp.toString()}`);
+                  }}
                 >
                   {label}
                 </button>
@@ -901,8 +986,57 @@ export function MachinesView({
                 onContinueWipeout={() =>
                   router.push(`/wipeout?id=${selected.id}`)
                 }
+                onOpenSetup={() => setTab("setup")}
+                onStartSetup={() => {
+                  startTransition(async () => {
+                    const res = await startSetupAction(selected.id);
+                    if (!res.ok) setError(res.error);
+                    else {
+                      setTab("setup");
+                      router.refresh();
+                    }
+                  });
+                }}
                 error={error}
               />
+            ) : null}
+
+            {tab === "setup" ? (
+              selected.setupChecklist ? (
+                <SetupChecklistPanel
+                  machineId={selected.id}
+                  checklist={selected.setupChecklist}
+                  readOnly={Boolean(selected.setupChecklist.completedAt)}
+                />
+              ) : (
+                <div className="space-y-3 text-sm">
+                  <p className="text-muted">
+                    {selected.lifecycleStatus === "ACTIVE"
+                      ? "No setup checklist recorded."
+                      : "No setup checklist for this VM."}
+                  </p>
+                  {selected.lifecycleStatus === "PREPARING" ? (
+                    <Button
+                      variant="primary"
+                      disabled={pending}
+                      onClick={() => {
+                        startTransition(async () => {
+                          const res = await startSetupAction(selected.id);
+                          if (!res.ok) setError(res.error);
+                          else router.refresh();
+                        });
+                      }}
+                    >
+                      Start setup checklist
+                    </Button>
+                  ) : null}
+                  {error ? (
+                    <p className="text-sm text-rose-700" role="alert">
+                      {error}
+                    </p>
+                  ) : null}
+                </div>
+              )
             ) : null}
 
             {tab === "proxy" ? (
@@ -1072,6 +1206,8 @@ function Overview({
   onRotate,
   onMigrate,
   onContinueWipeout,
+  onOpenSetup,
+  onStartSetup,
   error,
 }: {
   machine: DetailMachine;
@@ -1092,10 +1228,15 @@ function Overview({
   onRotate: () => void;
   onMigrate: () => void;
   onContinueWipeout: () => void;
+  onOpenSetup: () => void;
+  onStartSetup: () => void;
   error: string | null;
 }) {
   const current = machine.proxyAssignments.find((a) => !a.endedAt)?.proxy;
   const openWipeout = Boolean(machine.closure && !machine.closure.completedAt);
+  const openSetup = Boolean(
+    machine.setupChecklist && !machine.setupChecklist.completedAt,
+  );
   return (
     <form
       className="space-y-3"
@@ -1143,6 +1284,36 @@ function Overview({
           </div>
         </div>
       </div>
+      {machine.setupChecklist ? (
+        <div className="space-y-2">
+          <SetupChecklistPanel
+            machineId={machine.id}
+            checklist={machine.setupChecklist}
+            compact
+          />
+          {openSetup ? (
+            <Button type="button" variant="outline" size="sm" onClick={onOpenSetup}>
+              Continue setup
+            </Button>
+          ) : null}
+        </div>
+      ) : machine.lifecycleStatus === "PREPARING" ? (
+        <div className="rounded-slate border border-line p-3 text-sm">
+          <p className="text-muted">No setup checklist yet.</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            disabled={pending}
+            onClick={onStartSetup}
+          >
+            Start setup checklist
+          </Button>
+        </div>
+      ) : machine.lifecycleStatus === "ACTIVE" ? (
+        <p className="text-xs text-muted">No setup checklist recorded.</p>
+      ) : null}
       <Field label="Display name">
         <Input name="displayName" defaultValue={machine.displayName || ""} />
       </Field>

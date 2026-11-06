@@ -35,6 +35,8 @@ async function reset() {
       "ActivityEvent",
       "ClosureChecklistItem",
       "ClosureChecklist",
+      "SetupChecklistItem",
+      "SetupChecklist",
       "ProxyAssignment",
       "Proxy",
       "MachineMigration",
@@ -56,6 +58,7 @@ async function reset() {
   await prisma.checklistTemplate.create({
     data: {
       name: "Default wipeout",
+      kind: "WIPEOUT",
       isDefault: true,
       items: {
         create: [
@@ -66,6 +69,7 @@ async function reset() {
       },
     },
   });
+  // Setup template is created by ensureDefaultSetupTemplate via createMachine
 }
 
 async function user() {
@@ -113,6 +117,14 @@ describe("VM Control business invariants", () => {
     expect(reloaded.displayName).toBe("web");
     expect(reloaded.internalIp).toBe("192.168.201.10");
     expect(reloaded.country).toBe("DE");
+    expect(reloaded.lifecycleStatus).toBe(LifecycleStatus.PREPARING);
+    expect(reloaded.setupChecklist?.items.length).toBe(14);
+    expect(
+      reloaded.setupChecklist?.items.every((i) => i.status === "PENDING"),
+    ).toBe(true);
+    expect(
+      reloaded.setupChecklist?.items.some((i) => i.label === "Create the VM"),
+    ).toBe(true);
   });
 
   it("1b. search includes internal IP; country optional and unset by default", async () => {
@@ -420,6 +432,98 @@ describe("VM Control business invariants", () => {
       where: { endedAt: null, proxyId: { in: [p2.id, p3.id] } },
     });
     expect(openProxies.length).toBeLessThanOrEqual(1);
+  });
+
+  it("14a. finish setup Preparing→Active; reject premature finish", async () => {
+    const { createMachine, getMachine } = await import(
+      "../src/lib/services/machines"
+    );
+    const { finishSetup, updateSetupItem } = await import(
+      "../src/lib/services/setup"
+    );
+    const actor = await user();
+    const server = await prisma.server.create({ data: { name: "1tech2" } });
+    const company = await prisma.company.create({ data: { name: "Acme" } });
+    const m = await createMachine(
+      { vmid: 501, serverId: server.id, companyId: company.id },
+      actor.id,
+    );
+    await expect(finishSetup(m.id, actor.id)).rejects.toMatchObject({
+      code: "SETUP_INCOMPLETE",
+    });
+    const created = await getMachine(m.id);
+    for (const item of created.setupChecklist!.items.filter((i) => i.required)) {
+      await updateSetupItem(
+        item.id,
+        { status: ChecklistItemStatus.COMPLETED },
+        actor.id,
+      );
+    }
+    const finished = await finishSetup(m.id, actor.id);
+    expect(finished.lifecycleStatus).toBe(LifecycleStatus.ACTIVE);
+    const again = await getMachine(m.id);
+    expect(again.setupChecklist?.completedAt).not.toBeNull();
+  });
+
+  it("14b. cannot mark Active while setup unfinished; wipeout template sync", async () => {
+    const { createMachine, updateMachine } = await import(
+      "../src/lib/services/machines"
+    );
+    const {
+      ensureDefaultTemplate,
+      previewMissingWipeoutTasks,
+      addMissingWipeoutTasks,
+      markBurnedAndStartClosure,
+    } = await import("../src/lib/services/wipeout");
+    const actor = await user();
+    const server = await prisma.server.create({ data: { name: "1tech2" } });
+    const company = await prisma.company.create({ data: { name: "Acme" } });
+    const m = await createMachine(
+      { vmid: 502, serverId: server.id, companyId: company.id },
+      actor.id,
+    );
+    await expect(
+      updateMachine(
+        m.id,
+        { lifecycleStatus: LifecycleStatus.ACTIVE },
+        actor.id,
+      ),
+    ).rejects.toMatchObject({ code: "SETUP_INCOMPLETE" });
+
+    // Snapshot from short test template (Item A/B) first
+    const checklist = await markBurnedAndStartClosure(m.id, actor.id);
+    expect(checklist.items.length).toBe(3);
+
+    // Then sync wipeout template (email + RedDot) without mutating the snapshot
+    const tpl = await ensureDefaultTemplate();
+    const labels = tpl.items.map((i) => i.label);
+    expect(
+      labels.some((l) => l.includes("Shut down the associated email")),
+    ).toBe(true);
+    expect(labels.some((l) => l.includes("RedDot"))).toBe(true);
+    const again = await ensureDefaultTemplate();
+    expect(again.items.length).toBe(tpl.items.length);
+
+    const unchanged = await prisma.closureChecklist.findUniqueOrThrow({
+      where: { id: checklist.id },
+      include: { items: true },
+    });
+    expect(unchanged.items.length).toBe(3);
+
+    const missing = await previewMissingWipeoutTasks(checklist.id);
+    expect(missing.length).toBeGreaterThan(0);
+    await addMissingWipeoutTasks(
+      checklist.id,
+      [missing[0].label],
+      actor.id,
+    );
+    const reloaded = await prisma.closureChecklist.findUniqueOrThrow({
+      where: { id: checklist.id },
+      include: { items: true },
+    });
+    expect(reloaded.items.some((i) => i.label === missing[0].label)).toBe(
+      true,
+    );
   });
 
   it("13. template edits do not mutate existing checklists", async () => {

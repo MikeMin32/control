@@ -40,6 +40,11 @@ enum ChecklistItemStatus {
   NOT_APPLICABLE
 }
 
+enum ChecklistTemplateKind {
+  WIPEOUT
+  SETUP
+}
+
 model User {
   id           String    @id @default(uuid()) @db.Uuid
   email        String    @unique
@@ -51,6 +56,8 @@ model User {
   activities   ActivityEvent[]
   checklistCompletions ClosureChecklistItem[] @relation("CompletedBy")
   closures     ClosureChecklist[] @relation("ClosedBy")
+  setupCompletions SetupChecklistItem[] @relation("SetupCompletedBy")
+  setupsClosed SetupChecklist[] @relation("SetupClosedBy")
 }
 
 model Session {
@@ -123,6 +130,7 @@ model Machine {
   proxyAssignments ProxyAssignment[]
   migrations      MachineMigration[]
   closure         ClosureChecklist?
+  setupChecklist  SetupChecklist?
   activities      ActivityEvent[]
 
   @@index([serverId])
@@ -198,24 +206,63 @@ model ProxyAssignment {
 /// At most one open assignment per machine — partial unique WHERE ended_at IS NULL
 
 model ChecklistTemplate {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String   @unique
-  isDefault Boolean  @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id        String                @id @default(uuid()) @db.Uuid
+  name      String                @unique
+  kind      ChecklistTemplateKind @default(WIPEOUT)
+  isDefault Boolean               @default(false)
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
   items     ChecklistTemplateItem[]
+
+  @@index([kind])
 }
 
 model ChecklistTemplateItem {
-  id         String  @id @default(uuid()) @db.Uuid
-  templateId String  @db.Uuid
-  label      String
-  required   Boolean @default(true)
-  sortOrder  Int     @default(0)
+  id          String  @id @default(uuid()) @db.Uuid
+  templateId  String  @db.Uuid
+  label       String
+  description String?
+  section     String?
+  required    Boolean @default(true)
+  sortOrder   Int     @default(0)
 
   template ChecklistTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
 
   @@index([templateId])
+}
+
+model SetupChecklist {
+  id            String    @id @default(uuid()) @db.Uuid
+  machineId     String    @unique @db.Uuid
+  startedAt     DateTime  @default(now())
+  completedAt   DateTime?
+  completedById String?   @db.Uuid
+  templateName  String
+  actorId       String?   @db.Uuid
+
+  machine     Machine              @relation(fields: [machineId], references: [id])
+  completedBy User?                @relation("SetupClosedBy", fields: [completedById], references: [id])
+  items       SetupChecklistItem[]
+}
+
+model SetupChecklistItem {
+  id            String              @id @default(uuid()) @db.Uuid
+  checklistId   String              @db.Uuid
+  section       String
+  label         String
+  description   String?
+  required      Boolean             @default(true)
+  sortOrder     Int                 @default(0)
+  status        ChecklistItemStatus @default(PENDING)
+  notes         String?
+  naReason      String?
+  completedAt   DateTime?
+  completedById String?             @db.Uuid
+
+  checklist   SetupChecklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  completedBy User?          @relation("SetupCompletedBy", fields: [completedById], references: [id])
+
+  @@index([checklistId])
 }
 
 model ClosureChecklist {
@@ -238,6 +285,7 @@ model ClosureChecklistItem {
   id              String              @id @default(uuid()) @db.Uuid
   checklistId     String              @db.Uuid
   label           String
+  description     String?
   required        Boolean             @default(true)
   sortOrder       Int                 @default(0)
   status          ChecklistItemStatus @default(PENDING)

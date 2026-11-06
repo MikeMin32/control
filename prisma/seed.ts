@@ -37,33 +37,14 @@ async function main() {
     create: { id: 1, displayTimezone: "Europe/Kyiv" },
   });
 
-  const defaultItems = [
-    "Proxy subscription cancelled or renewal disabled.",
-    "Proxy configuration removed.",
-    "Browser/application profiles removed.",
-    "Associated email accounts removed or detached as appropriate.",
-    "VM deleted or prepared for reuse.",
-    "Relevant network rules and access removed.",
-  ];
-
-  let template = await prisma.checklistTemplate.findFirst({
-    where: { isDefault: true },
-  });
-  if (!template) {
-    template = await prisma.checklistTemplate.create({
-      data: {
-        name: "Default wipeout",
-        isDefault: true,
-        items: {
-          create: defaultItems.map((label, i) => ({
-            label,
-            required: true,
-            sortOrder: i,
-          })),
-        },
-      },
-    });
-  }
+  // Templates are synced idempotently by service helpers (no wipe of customs).
+  const { ensureDefaultTemplate } = await import("../src/lib/services/wipeout");
+  const { ensureDefaultSetupTemplate } = await import("../src/lib/services/setup");
+  const wipeoutTemplate = await ensureDefaultTemplate();
+  await ensureDefaultSetupTemplate();
+  const defaultItems = wipeoutTemplate.items
+    .slice()
+    .sort((a, b) => a.sortOrder - b.sortOrder);
 
   const s1 = await upsertServer("1tech2");
   const s2 = await upsertServer("xeon");
@@ -274,11 +255,12 @@ async function main() {
       data: {
         machineId: mBurned.id,
         reason: ClosureReason.BURNED,
-        templateName: template.name,
+        templateName: wipeoutTemplate.name,
         items: {
-          create: defaultItems.map((label, i) => ({
-            label,
-            required: true,
+          create: defaultItems.map((item, i) => ({
+            label: item.label,
+            description: item.description,
+            required: item.required,
             sortOrder: i,
             status:
               i < 2
@@ -300,12 +282,13 @@ async function main() {
       data: {
         machineId: mArchived.id,
         reason: ClosureReason.EXPIRED,
-        templateName: template.name,
+        templateName: wipeoutTemplate.name,
         completedAt: new Date("2025-11-01T12:00:00Z"),
         items: {
-          create: defaultItems.map((label, i) => ({
-            label,
-            required: true,
+          create: defaultItems.map((item, i) => ({
+            label: item.label,
+            description: item.description,
+            required: item.required,
             sortOrder: i,
             status: ChecklistItemStatus.COMPLETED,
             completedAt: new Date("2025-11-01T12:00:00Z"),

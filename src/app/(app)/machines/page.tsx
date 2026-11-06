@@ -23,6 +23,7 @@ export default async function MachinesPage({
   const status = (sp.status as LifecycleStatus | undefined) || undefined;
   const page = Number(sp.page || 1);
   const id = sp.id;
+  const tab = sp.tab || "";
 
   const [list, servers, companies, availableProxies, settings, grouped] =
     await Promise.all([
@@ -75,6 +76,7 @@ export default async function MachinesPage({
         initialServerId={serverId || ""}
         initialQ={q}
         initialStatus={status || ""}
+        initialTab={tab}
         serverCounts={serverCounts}
         allCount={allCount}
         proxmox={getProxmoxStatusSync()}

@@ -1,6 +1,9 @@
 import { Suspense } from "react";
 import { WipeoutView } from "@/components/wipeout/wipeout-view";
-import { listWipeoutQueue } from "@/lib/services/wipeout";
+import {
+  ensureDefaultTemplate,
+  listWipeoutQueue,
+} from "@/lib/services/wipeout";
 import { getOrCreateSettings } from "@/lib/services/settings";
 
 export default async function WipeoutPage({
@@ -9,6 +12,7 @@ export default async function WipeoutPage({
   searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const sp = await searchParams;
+  await ensureDefaultTemplate();
   const [rows, settings] = await Promise.all([
     listWipeoutQueue(),
     getOrCreateSettings(),
