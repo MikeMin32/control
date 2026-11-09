@@ -4,8 +4,8 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3001 -H 127.0.0.1",
-    "build": "prisma generate && next build",
-    "start": "next start -p 3001 -H 127.0.0.1",
+    "build": "node scripts/assert-dev-not-using-next-dir.mjs && prisma generate && NEXT_DIST_DIR=.next-build next build",
+    "start": "NEXT_DIST_DIR=.next-build next start -p 3001 -H 127.0.0.1",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "TEST_DATABASE_URL=${TEST_DATABASE_URL:-postgresql://vmcontrol:vmcontrol@127.0.0.1:5434/vmcontrol_test} DATABASE_URL=${TEST_DATABASE_URL:-postgresql://vmcontrol:vmcontrol@127.0.0.1:5434/vmcontrol_test} vitest run",
