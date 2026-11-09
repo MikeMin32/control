@@ -15,6 +15,7 @@ if (distDir !== ".next") {
 
 let listening = false;
 try {
+  // `ss` is absent in Alpine build images — treat as not listening.
   const out = execSync(`ss -ltnp 'sport = :${port}'`, { encoding: "utf8" });
   listening = /next-server|next dev/.test(out);
 } catch {
