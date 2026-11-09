@@ -33,8 +33,10 @@ import {
   startSetupAction,
   updateMachineAction,
 } from "@/lib/actions";
+import { InternalIpField } from "@/components/machines/internal-ip-field";
 import { SetupChecklistPanel } from "@/components/setup/setup-checklist-panel";
 import { countryName } from "@/lib/countries";
+import { isValidIpv4 } from "@/lib/internal-ip";
 import {
   LIFECYCLE_CREATE_STATUSES,
   LIFECYCLE_DOT,
@@ -127,6 +129,8 @@ export function MachinesView({
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
   const [addOpen, setAddOpen] = useState(false);
+  const [addFormKey, setAddFormKey] = useState(0);
+  const [addVmid, setAddVmid] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [copyToast, setCopyToast] = useState<string | null>(null);
   const [tab, setTab] = useState<"overview" | "setup" | "proxy" | "activity">(
@@ -327,7 +331,15 @@ export function MachinesView({
           >
             <RefreshCw className="h-4 w-4" strokeWidth={1.75} />
           </Button>
-          <Button variant="primary" onClick={() => setAddOpen(true)}>
+          <Button
+            variant="primary"
+            onClick={() => {
+              setAddFormKey((k) => k + 1);
+              setAddVmid("");
+              setError(null);
+              setAddOpen(true);
+            }}
+          >
             <Plus className="h-4 w-4" strokeWidth={2} />
             Add VM
           </Button>
@@ -689,6 +701,7 @@ export function MachinesView({
         }
       >
         <form
+          key={addFormKey}
           id="add-vm-form"
           className="space-y-3"
           onSubmit={(e) => {
@@ -701,13 +714,18 @@ export function MachinesView({
                 setError("Status is required");
                 return;
               }
+              const internalIpRaw = String(fd.get("internalIp") || "").trim();
+              if (internalIpRaw && !isValidIpv4(internalIpRaw)) {
+                setError("Internal IP must be a valid IPv4 address");
+                return;
+              }
               const res = await createMachineAction({
                 vmid: Number(fd.get("vmid")),
                 displayName: String(fd.get("displayName") || "") || undefined,
                 serverId: String(fd.get("serverId")),
                 company: String(fd.get("company") || "") || null,
                 lifecycleStatus: status as LifecycleStatus,
-                internalIp: String(fd.get("internalIp") || "") || undefined,
+                internalIp: internalIpRaw || undefined,
                 country: String(fd.get("country") || "") || null,
                 notes: String(fd.get("notes") || "") || undefined,
                 proxyId: String(fd.get("proxyId") || "") || null,
@@ -730,7 +748,14 @@ export function MachinesView({
         >
           <div className="grid grid-cols-2 gap-3">
             <Field label="VMID">
-              <Input name="vmid" type="number" required min={1} />
+              <Input
+                name="vmid"
+                type="number"
+                required
+                min={1}
+                value={addVmid}
+                onChange={(e) => setAddVmid(e.target.value)}
+              />
             </Field>
             <Field label="Display name">
               <Input name="displayName" />
@@ -766,9 +791,12 @@ export function MachinesView({
             <CountrySelect name="country" defaultValue="" />
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Internal IP">
-              <Input name="internalIp" />
-            </Field>
+            <InternalIpField
+              vmid={addVmid}
+              resetKey={addFormKey}
+              initialMode="auto"
+              initialValue=""
+            />
             <Field label="Proxy">
               <Select name="proxyId" defaultValue="">
                 <option value="" />
@@ -930,6 +958,7 @@ export function MachinesView({
                 machine={selected}
                 timezone={timezone}
                 pending={pending}
+                onValidationError={(msg) => setError(msg)}
                 onSave={(input) => {
                   setError(null);
                   startTransition(async () => {
@@ -1161,6 +1190,7 @@ function Overview({
   timezone,
   pending,
   onSave,
+  onValidationError,
   onBurned,
   onRotate,
   onMigrate,
@@ -1181,6 +1211,7 @@ function Overview({
     os?: string | null;
     notes?: string | null;
   }) => void;
+  onValidationError: (message: string) => void;
   onBurned: () => void;
   onRotate: () => void;
   onMigrate: () => void;
@@ -1196,15 +1227,21 @@ function Overview({
   );
   return (
     <form
+      key={machine.id}
       className="space-y-3"
       onSubmit={(e) => {
         e.preventDefault();
         const fd = new FormData(e.currentTarget);
+        const internalIpRaw = String(fd.get("internalIp") || "").trim();
+        if (internalIpRaw && !isValidIpv4(internalIpRaw)) {
+          onValidationError("Internal IP must be a valid IPv4 address");
+          return;
+        }
         onSave({
           displayName: String(fd.get("displayName") || "") || null,
           company: String(fd.get("company") || "") || null,
           lifecycleStatus: String(fd.get("lifecycleStatus")) as LifecycleStatus,
-          internalIp: String(fd.get("internalIp") || "") || null,
+          internalIp: internalIpRaw || null,
           country: String(fd.get("country") || "") || null,
           os: String(fd.get("os") || "") || null,
           notes: String(fd.get("notes") || "") || null,
@@ -1290,9 +1327,12 @@ function Overview({
         <CountrySelect name="country" defaultValue={machine.country || ""} />
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label="Internal IP">
-          <Input name="internalIp" defaultValue={machine.internalIp || ""} />
-        </Field>
+        <InternalIpField
+          vmid={machine.vmid}
+          resetKey={`${machine.id}:${machine.internalIp ?? ""}`}
+          initialMode="manual"
+          initialValue={machine.internalIp || ""}
+        />
         <Field label="OS">
           <Input name="os" defaultValue={machine.os || ""} />
         </Field>
