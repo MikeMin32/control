@@ -144,6 +144,9 @@ model DolphinAccount {
   id            String   @id @default(uuid()) @db.Uuid
   accountName   String
   machineId     String?  @db.Uuid
+  /// Optional human label for the wallet (not the address).
+  wallet        String?
+  /// Public wallet address (migrated from prior walletAddress values).
   walletAddress String?
   network       String?
   notes         String?
@@ -154,6 +157,7 @@ model DolphinAccount {
 
   @@index([accountName])
   @@index([machineId])
+  @@index([wallet])
   @@index([walletAddress])
 }
 

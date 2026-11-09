@@ -311,26 +311,54 @@ async function main() {
   void mPrep;
   void pAvail;
 
-  const dolphinCount = await prisma.dolphinAccount.count();
-  if (dolphinCount === 0) {
-    await prisma.dolphinAccount.create({
-      data: {
-        accountName: "alpha-eth",
-        machineId: mActive.id,
-        walletAddress: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1",
-        network: "ETH",
-        notes: "Seed demo — no private keys",
-      },
+  async function ensureDolphin(
+    accountName: string,
+    data: {
+      machineId: string;
+      wallet?: string | null;
+      walletAddress: string;
+      network: string;
+      notes?: string;
+    },
+  ) {
+    const existing = await prisma.dolphinAccount.findFirst({
+      where: { accountName },
     });
-    await prisma.dolphinAccount.create({
+    if (existing) {
+      // Preserve network/address; only fill empty wallet label when provided
+      if (data.wallet && !existing.wallet) {
+        await prisma.dolphinAccount.update({
+          where: { id: existing.id },
+          data: { wallet: data.wallet },
+        });
+      }
+      return existing;
+    }
+    return prisma.dolphinAccount.create({
       data: {
-        accountName: "gamma-sol",
-        machineId: mShop.id,
-        walletAddress: "So11111111111111111111111111111111111111112",
-        network: "SOL",
+        accountName,
+        machineId: data.machineId,
+        wallet: data.wallet ?? null,
+        walletAddress: data.walletAddress,
+        network: data.network,
+        notes: data.notes,
       },
     });
   }
+
+  await ensureDolphin("alpha-eth", {
+    machineId: mActive.id,
+    wallet: "Trading",
+    walletAddress: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1",
+    network: "ETH",
+    notes: "Seed demo — no private keys",
+  });
+  await ensureDolphin("gamma-sol", {
+    machineId: mShop.id,
+    wallet: null,
+    walletAddress: "So11111111111111111111111111111111111111112",
+    network: "SOL",
+  });
 
   console.log("Seed complete (idempotent).");
 }

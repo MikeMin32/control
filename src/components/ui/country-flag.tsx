@@ -13,12 +13,16 @@ export function CountryFlag({
   code,
   className,
   showCode = true,
+  flagOnly = false,
 }: {
   code: string | null | undefined;
   className?: string;
   showCode?: boolean;
+  /** Flag image + tooltip/a11y only — no visible code or country name. */
+  flagOnly?: boolean;
 }) {
   if (!code) {
+    if (flagOnly) return null;
     return <span className="text-muted">—</span>;
   }
   const upper = code.toUpperCase();
@@ -27,7 +31,11 @@ export function CountryFlag({
 
   return (
     <span
-      className={cn("inline-flex items-center gap-1.5", className)}
+      className={cn(
+        "inline-flex items-center",
+        flagOnly ? "gap-0" : "gap-1.5",
+        className,
+      )}
       title={name}
     >
       {Flag ? (
@@ -35,9 +43,11 @@ export function CountryFlag({
           className="h-3.5 w-[21px] shrink-0 rounded-[2px] border border-line object-cover"
           aria-hidden
         />
+      ) : flagOnly ? (
+        <span className="sr-only">{name}</span>
       ) : null}
       <span className="sr-only">{name}</span>
-      {showCode ? (
+      {flagOnly ? null : showCode ? (
         <span className="text-xs font-medium uppercase tracking-wide text-ink">
           {upper}
         </span>

@@ -708,24 +708,31 @@ describe("VM Control business invariants", () => {
       {
         accountName: "alpha-wallet",
         machineId: m.id,
+        wallet: "Hot wallet",
         walletAddress: "0xabc123def4567890",
-        network: "ETH",
       },
       actor.id,
     );
     expect(row.accountName).toBe("alpha-wallet");
+    expect(row.wallet).toBe("Hot wallet");
+    expect(row.network).toBe("TRC20"); // default for new accounts
     const byName = await listDolphinAccounts({ q: "alpha" });
     expect(byName).toHaveLength(1);
     const byVm = await listDolphinAccounts({ q: "701" });
     expect(byVm).toHaveLength(1);
-    const byWallet = await listDolphinAccounts({ q: "0xabc123" });
-    expect(byWallet).toHaveLength(1);
+    const byCompany = await listDolphinAccounts({ q: "Acme" });
+    expect(byCompany).toHaveLength(1);
+    const byLabel = await listDolphinAccounts({ q: "Hot wallet" });
+    expect(byLabel).toHaveLength(1);
+    const byAddress = await listDolphinAccounts({ q: "0xabc123" });
+    expect(byAddress).toHaveLength(1);
 
     await updateDolphinAccount(
       row.id,
       {
         accountName: "alpha-wallet",
         machineId: null,
+        wallet: "Hot wallet",
         walletAddress: "0xabc123def4567890",
         network: "ETH",
       },
@@ -733,6 +740,7 @@ describe("VM Control business invariants", () => {
     );
     const unlinked = await listDolphinAccounts({ q: "alpha" });
     expect(unlinked[0].machineId).toBeNull();
+    expect(unlinked[0].network).toBe("ETH");
 
     await deleteDolphinAccount(row.id, actor.id);
     expect(await listDolphinAccounts({ q: "alpha" })).toHaveLength(0);

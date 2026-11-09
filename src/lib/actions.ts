@@ -367,6 +367,7 @@ export async function finishSetupAction(
 export async function createDolphinAction(input: {
   accountName: string;
   machineId?: string | null;
+  wallet?: string | null;
   walletAddress?: string | null;
   network?: string | null;
   notes?: string | null;
@@ -388,6 +389,7 @@ export async function updateDolphinAction(
   input: {
     accountName: string;
     machineId?: string | null;
+    wallet?: string | null;
     walletAddress?: string | null;
     network?: string | null;
     notes?: string | null;

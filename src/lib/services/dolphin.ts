@@ -3,22 +3,32 @@ import { prisma } from "../db";
 import { AppError } from "../errors";
 import { logActivity } from "../activity";
 
+export const DEFAULT_DOLPHIN_NETWORK = "TRC20";
+
 export type DolphinInput = {
   accountName: string;
   machineId?: string | null;
+  /** Optional human wallet label. */
+  wallet?: string | null;
+  /** Public address. */
   walletAddress?: string | null;
   network?: string | null;
   notes?: string | null;
 };
 
-function normalizeInput(input: DolphinInput) {
+function normalizeInput(input: DolphinInput, opts?: { isCreate?: boolean }) {
   const accountName = input.accountName.trim();
   if (!accountName) throw new AppError("Account name is required");
+  let network = input.network?.trim() || null;
+  if (opts?.isCreate && !network) {
+    network = DEFAULT_DOLPHIN_NETWORK;
+  }
   return {
     accountName,
     machineId: input.machineId?.trim() || null,
+    wallet: input.wallet?.trim() || null,
     walletAddress: input.walletAddress?.trim() || null,
-    network: input.network?.trim() || null,
+    network,
     notes: input.notes?.trim() || null,
   };
 }
@@ -30,6 +40,15 @@ async function assertMachineExists(
   if (!machineId) return;
   const machine = await tx.machine.findUnique({ where: { id: machineId } });
   if (!machine) throw new AppError("Linked VM not found", "NOT_FOUND", 404);
+}
+
+/** Plain-text linked VM label for selectors: `101 · Company`. */
+export function linkedVmOptionLabel(m: {
+  vmid: number;
+  company?: { name: string } | null;
+}): string {
+  const company = m.company?.name?.trim() || "No company";
+  return `${m.vmid} · ${company}`;
 }
 
 export async function listLinkableMachines() {
@@ -45,11 +64,13 @@ export async function listDolphinAccounts(params?: { q?: string }) {
     ? {
         OR: [
           { accountName: { contains: q, mode: "insensitive" } },
+          { wallet: { contains: q, mode: "insensitive" } },
           { walletAddress: { contains: q, mode: "insensitive" } },
           { network: { contains: q, mode: "insensitive" } },
           {
             machine: {
               OR: [
+                { company: { name: { contains: q, mode: "insensitive" } } },
                 { displayName: { contains: q, mode: "insensitive" } },
                 ...(Number.isFinite(Number.parseInt(q, 10))
                   ? [{ vmid: Number.parseInt(q, 10) }]
@@ -87,7 +108,7 @@ export async function createDolphinAccount(
   input: DolphinInput,
   actorId: string,
 ) {
-  const data = normalizeInput(input);
+  const data = normalizeInput(input, { isCreate: true });
   return prisma.$transaction(async (tx) => {
     await assertMachineExists(tx, data.machineId);
     const row = await tx.dolphinAccount.create({ data });

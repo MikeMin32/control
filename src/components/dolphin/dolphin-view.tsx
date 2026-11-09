@@ -30,6 +30,10 @@ import {
   LIFECYCLE_LABELS,
   LIFECYCLE_PILL,
 } from "@/lib/labels";
+import {
+  DEFAULT_DOLPHIN_NETWORK,
+  linkedVmOptionLabel,
+} from "@/lib/services/dolphin";
 
 type MachineOption = Machine & { server: Server; company: Company };
 
@@ -37,35 +41,26 @@ type AccountRow = DolphinAccount & {
   machine: MachineOption | null;
 };
 
+/** `101 · Alpha Labs · [flag]` — VMID + company + flag only. */
 function machineLine(m: MachineOption | null | undefined) {
   if (!m) return null;
+  const company = m.company?.name?.trim() || "No company";
   const parts: ReactNode[] = [];
   parts.push(<span key="vmid">{m.vmid}</span>);
-  if (m.displayName) {
-    parts.push(<span key="sep1"> · </span>);
-    parts.push(<span key="name">{m.displayName}</span>);
-  }
+  parts.push(<span key="sep1"> · </span>);
+  parts.push(<span key="company">{company}</span>);
   if (m.country) {
     parts.push(<span key="sep2"> · </span>);
     parts.push(
-      <span key="flag" className="inline-flex items-center gap-1">
-        <CountryFlag code={m.country} />
-        <span>{m.country}</span>
-      </span>,
+      <CountryFlag key="flag" code={m.country} flagOnly className="align-middle" />,
     );
   }
-  if (m.lifecycleStatus === "ARCHIVED" || m.archivedAt) {
-    parts.push(<span key="sep3"> · </span>);
-    parts.push(
-      <span key="arch" className="text-muted">
-        archived
-      </span>,
-    );
-  }
-  return <span className="inline-flex flex-wrap items-center gap-x-0.5">{parts}</span>;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-0.5">{parts}</span>
+  );
 }
 
-function truncateWallet(addr: string, head = 8, tail = 6) {
+function truncateAddress(addr: string, head = 8, tail = 6) {
   if (addr.length <= head + tail + 1) return addr;
   return `${addr.slice(0, head)}…${addr.slice(-tail)}`;
 }
@@ -96,10 +91,10 @@ export function DolphinView({
     [machines],
   );
 
-  async function copyWallet(addr: string) {
+  async function copyAddress(addr: string) {
     try {
       await navigator.clipboard.writeText(addr);
-      setCopyToast("Wallet copied");
+      setCopyToast("Address copied");
       setTimeout(() => setCopyToast(null), 2000);
     } catch {
       setCopyToast("Copy failed");
@@ -119,7 +114,7 @@ export function DolphinView({
         <div>
           <h1 className="page-title">Dolphin</h1>
           <p className="page-subtitle">
-            Account records linked to VMs. No private keys — wallet address only.
+            Manage Dolphin accounts, linked VMs, and wallets.
           </p>
         </div>
         <Button variant="primary" onClick={() => setAddOpen(true)}>
@@ -132,7 +127,7 @@ export function DolphinView({
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
         <Input
           className="pl-9"
-          placeholder="Search account, VM, or wallet"
+          placeholder="Search account, VMID, company, wallet, or address"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
@@ -156,16 +151,17 @@ export function DolphinView({
             <tr>
               <th className="px-4 py-3 font-medium">Account name</th>
               <th className="px-4 py-3 font-medium">Linked VM</th>
-              <th className="px-4 py-3 font-medium">Crypto wallet</th>
+              <th className="px-4 py-3 font-medium">Wallet</th>
+              <th className="px-4 py-3 font-medium">Address</th>
               <th className="px-4 py-3 font-medium">Network</th>
-              <th className="px-4 py-3 font-medium" />
+              <th className="px-4 py-3 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
             {accounts.length === 0 ? (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   className="px-4 py-8 text-center text-sm text-muted"
                 >
                   No Dolphin accounts yet.
@@ -199,14 +195,21 @@ export function DolphinView({
                     )}
                   </td>
                   <td className="px-4 py-3">
+                    {row.wallet?.trim() ? (
+                      <span className="text-ink">{row.wallet}</span>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
                     {row.walletAddress ? (
                       <button
                         type="button"
                         className="inline-flex items-center gap-1.5 font-mono text-xs text-ink hover:underline"
                         title={row.walletAddress}
-                        onClick={() => copyWallet(row.walletAddress!)}
+                        onClick={() => copyAddress(row.walletAddress!)}
                       >
-                        {truncateWallet(row.walletAddress)}
+                        {truncateAddress(row.walletAddress)}
                         <Copy className="h-3.5 w-3.5 text-muted" />
                       </button>
                     ) : (
@@ -360,12 +363,14 @@ function AccountFormDialog({
   onSubmit: (input: {
     accountName: string;
     machineId?: string | null;
+    wallet?: string | null;
     walletAddress?: string | null;
     network?: string | null;
     notes?: string | null;
   }) => void;
 }) {
   const formId = initial ? "edit-dolphin-form" : "add-dolphin-form";
+  const isCreate = !initial;
   return (
     <Dialog
       open={open}
@@ -396,6 +401,7 @@ function AccountFormDialog({
           onSubmit({
             accountName: String(fd.get("accountName") || ""),
             machineId: String(fd.get("machineId") || "") || null,
+            wallet: String(fd.get("wallet") || "") || null,
             walletAddress: String(fd.get("walletAddress") || "") || null,
             network: String(fd.get("network") || "") || null,
             notes: String(fd.get("notes") || "") || null,
@@ -419,30 +425,36 @@ function AccountFormDialog({
             <option value="">None</option>
             {machines.map((m) => (
               <option key={m.id} value={m.id}>
-                {m.vmid}
-                {m.displayName ? ` · ${m.displayName}` : ""}
-                {m.country ? ` · ${m.country}` : ""}
-                {m.lifecycleStatus === "ARCHIVED" || m.archivedAt
-                  ? " (archived)"
-                  : ""}
-                {` · ${m.server.name}`}
+                {linkedVmOptionLabel(m)}
               </option>
             ))}
           </Select>
         </Field>
-        <Field label="Wallet address">
+        <Field label="Wallet">
+          <Input
+            name="wallet"
+            placeholder="Optional label"
+            defaultValue={initial?.wallet || ""}
+            key={initial?.id || "new-wallet-label"}
+          />
+        </Field>
+        <Field label="Address">
           <Input
             name="walletAddress"
-            placeholder="0x… or chain address"
+            placeholder="Public wallet address"
             defaultValue={initial?.walletAddress || ""}
-            key={initial?.id || "new-wallet"}
+            key={initial?.id || "new-address"}
           />
         </Field>
         <Field label="Network">
           <Input
             name="network"
-            placeholder="e.g. ETH, SOL"
-            defaultValue={initial?.network || ""}
+            placeholder={DEFAULT_DOLPHIN_NETWORK}
+            defaultValue={
+              isCreate
+                ? DEFAULT_DOLPHIN_NETWORK
+                : initial?.network || ""
+            }
             key={initial?.id || "new-net"}
           />
         </Field>
