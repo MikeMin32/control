@@ -40,6 +40,7 @@ async function reset() {
       "ProxyAssignment",
       "Proxy",
       "MachineMigration",
+      "DolphinAccount",
       "Machine",
       "Company",
       "Server",
@@ -559,5 +560,183 @@ describe("VM Control business invariants", () => {
     expect(reloaded.items.some((i) => i.label === "Brand new only")).toBe(
       false,
     );
+  });
+
+  it("15a. create Active/Burned without setup checklist; Preparing still has one", async () => {
+    const { createMachine, getMachine } = await import(
+      "../src/lib/services/machines"
+    );
+    const actor = await user();
+    const server = await prisma.server.create({ data: { name: "1tech2" } });
+    const company = await prisma.company.create({ data: { name: "Acme" } });
+
+    const prep = await createMachine(
+      {
+        vmid: 601,
+        serverId: server.id,
+        companyId: company.id,
+        lifecycleStatus: LifecycleStatus.PREPARING,
+      },
+      actor.id,
+    );
+    const prepFull = await getMachine(prep.id);
+    expect(prepFull.setupChecklist).not.toBeNull();
+
+    const active = await createMachine(
+      {
+        vmid: 602,
+        serverId: server.id,
+        companyId: company.id,
+        lifecycleStatus: LifecycleStatus.ACTIVE,
+      },
+      actor.id,
+    );
+    const activeFull = await getMachine(active.id);
+    expect(activeFull.lifecycleStatus).toBe(LifecycleStatus.ACTIVE);
+    expect(activeFull.setupChecklist).toBeNull();
+
+    const burned = await createMachine(
+      {
+        vmid: 603,
+        serverId: server.id,
+        companyId: company.id,
+        lifecycleStatus: LifecycleStatus.BURNED,
+      },
+      actor.id,
+    );
+    expect(burned.lifecycleStatus).toBe(LifecycleStatus.BURNED);
+    const burnedFull = await getMachine(burned.id);
+    expect(burnedFull.setupChecklist).toBeNull();
+
+    await expect(
+      createMachine(
+        {
+          vmid: 604,
+          serverId: server.id,
+          companyId: company.id,
+          lifecycleStatus: LifecycleStatus.EXPIRED,
+        },
+        actor.id,
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_STATUS" });
+  });
+
+  it("15b. setup finish with incomplete override; conflict on stale ids", async () => {
+    const { createMachine, getMachine } = await import(
+      "../src/lib/services/machines"
+    );
+    const { finishSetup } = await import("../src/lib/services/setup");
+    const actor = await user();
+    const server = await prisma.server.create({ data: { name: "1tech2" } });
+    const company = await prisma.company.create({ data: { name: "Acme" } });
+    const m = await createMachine(
+      { vmid: 611, serverId: server.id, companyId: company.id },
+      actor.id,
+    );
+    const full = await getMachine(m.id);
+    const unresolved = full.setupChecklist!.items.filter((i) => i.required);
+    expect(unresolved.length).toBeGreaterThan(0);
+
+    await expect(
+      finishSetup(m.id, actor.id, { allowIncomplete: true }),
+    ).rejects.toMatchObject({ code: "OVERRIDE_CONFLICT" });
+
+    const finished = await finishSetup(m.id, actor.id, {
+      allowIncomplete: true,
+      overrideNote: "ship now",
+      expectedUnresolvedIds: unresolved.map((i) => i.id),
+    });
+    expect(finished.lifecycleStatus).toBe(LifecycleStatus.ACTIVE);
+    const again = await getMachine(m.id);
+    expect(again.setupChecklist?.completedAt).not.toBeNull();
+    expect(again.setupChecklist?.completedWithOverride).toBe(true);
+    const stillPending = again.setupChecklist!.items.filter(
+      (i) => i.required && i.status === ChecklistItemStatus.PENDING,
+    );
+    expect(stillPending.length).toBe(unresolved.length);
+  });
+
+  it("15c. wipeout complete with incomplete override archives", async () => {
+    const { createMachine } = await import("../src/lib/services/machines");
+    const { markBurnedAndStartClosure, completeClosure } = await import(
+      "../src/lib/services/wipeout"
+    );
+    const actor = await user();
+    const server = await prisma.server.create({ data: { name: "1tech2" } });
+    const company = await prisma.company.create({ data: { name: "Acme" } });
+    const m = await createMachine(
+      { vmid: 612, serverId: server.id, companyId: company.id },
+      actor.id,
+    );
+    const checklist = await markBurnedAndStartClosure(m.id, actor.id);
+    const unresolved = checklist.items.filter((i) => i.required);
+    const archived = await completeClosure(m.id, actor.id, {
+      allowIncomplete: true,
+      expectedUnresolvedIds: unresolved.map((i) => i.id),
+      overrideNote: "partial wipe",
+    });
+    expect(archived.lifecycleStatus).toBe(LifecycleStatus.ARCHIVED);
+    const closure = await prisma.closureChecklist.findUniqueOrThrow({
+      where: { machineId: m.id },
+    });
+    expect(closure.completedWithOverride).toBe(true);
+    expect(closure.completedAt).not.toBeNull();
+  });
+
+  it("15d. Dolphin account CRUD + linked VM search", async () => {
+    const { createMachine } = await import("../src/lib/services/machines");
+    const {
+      createDolphinAccount,
+      listDolphinAccounts,
+      updateDolphinAccount,
+      deleteDolphinAccount,
+    } = await import("../src/lib/services/dolphin");
+    const actor = await user();
+    const server = await prisma.server.create({ data: { name: "1tech2" } });
+    const company = await prisma.company.create({ data: { name: "Acme" } });
+    const m = await createMachine(
+      {
+        vmid: 701,
+        serverId: server.id,
+        companyId: company.id,
+        displayName: "dolphin-host",
+        lifecycleStatus: LifecycleStatus.ACTIVE,
+      },
+      actor.id,
+    );
+    const row = await createDolphinAccount(
+      {
+        accountName: "alpha-wallet",
+        machineId: m.id,
+        walletAddress: "0xabc123def4567890",
+        network: "ETH",
+      },
+      actor.id,
+    );
+    expect(row.accountName).toBe("alpha-wallet");
+    const byName = await listDolphinAccounts({ q: "alpha" });
+    expect(byName).toHaveLength(1);
+    const byVm = await listDolphinAccounts({ q: "701" });
+    expect(byVm).toHaveLength(1);
+    const byWallet = await listDolphinAccounts({ q: "0xabc123" });
+    expect(byWallet).toHaveLength(1);
+
+    await updateDolphinAccount(
+      row.id,
+      {
+        accountName: "alpha-wallet",
+        machineId: null,
+        walletAddress: "0xabc123def4567890",
+        network: "ETH",
+      },
+      actor.id,
+    );
+    const unlinked = await listDolphinAccounts({ q: "alpha" });
+    expect(unlinked[0].machineId).toBeNull();
+
+    await deleteDolphinAccount(row.id, actor.id);
+    expect(await listDolphinAccounts({ q: "alpha" })).toHaveLength(0);
+    const stillThere = await prisma.machine.findUnique({ where: { id: m.id } });
+    expect(stillThere).not.toBeNull();
   });
 });

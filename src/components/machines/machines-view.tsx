@@ -32,16 +32,17 @@ import {
   markBurnedAction,
   migrateMachineAction,
   rotateProxyAction,
-  startClosureAction,
   startSetupAction,
   updateMachineAction,
 } from "@/lib/actions";
 import { SetupChecklistPanel } from "@/components/setup/setup-checklist-panel";
 import { countryName } from "@/lib/countries";
 import {
+  LIFECYCLE_CREATE_STATUSES,
   LIFECYCLE_DOT,
   LIFECYCLE_LABELS,
   LIFECYCLE_PILL,
+  LIFECYCLE_UI_STATUSES,
 } from "@/lib/labels";
 import type { ProxmoxStatus } from "@/lib/proxmox";
 import {
@@ -246,7 +247,6 @@ export function MachinesView({
     return (
       m.lifecycleStatus === "ACTIVE" ||
       m.lifecycleStatus === "PREPARING" ||
-      m.lifecycleStatus === "EXPIRED" ||
       m.lifecycleStatus === "BURNED"
     );
   }
@@ -282,12 +282,7 @@ export function MachinesView({
       return;
     }
     startTransition(async () => {
-      const reason =
-        m.lifecycleStatus === "EXPIRED" ? "EXPIRED" : "BURNED";
-      const res =
-        reason === "EXPIRED"
-          ? await startClosureAction(m.id, "EXPIRED")
-          : await markBurnedAction(m.id);
+      const res = await markBurnedAction(m.id);
       if (!res.ok) {
         setError(res.error);
         return;
@@ -415,13 +410,11 @@ export function MachinesView({
           }
         >
           <option value="ALL">All statuses</option>
-          {Object.entries(LIFECYCLE_LABELS)
-            .filter(([k]) => k !== "ARCHIVED")
-            .map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
+          {LIFECYCLE_UI_STATUSES.filter((k) => k !== "ARCHIVED").map((k) => (
+            <option key={k} value={k}>
+              {LIFECYCLE_LABELS[k]}
+            </option>
+          ))}
         </Select>
       </div>
 
@@ -737,7 +730,13 @@ export function MachinesView({
               }
               setAddOpen(false);
               router.refresh();
-              if (res.id) openMachine(res.id, "setup");
+              if (res.id) {
+                const status = String(fd.get("lifecycleStatus") || "PREPARING");
+                openMachine(
+                  res.id,
+                  status === "PREPARING" ? "setup" : "overview",
+                );
+              }
             });
           }}
         >
@@ -774,12 +773,16 @@ export function MachinesView({
           <Field label="Or create company">
             <Input name="newCompany" placeholder="New company name" />
           </Field>
-          <Field label="Lifecycle">
-            <Select name="lifecycleStatus" defaultValue="PREPARING" disabled>
-              <option value="PREPARING">Preparing</option>
+          <Field label="Status">
+            <Select name="lifecycleStatus" defaultValue="PREPARING">
+              {LIFECYCLE_CREATE_STATUSES.map((k) => (
+                <option key={k} value={k}>
+                  {LIFECYCLE_LABELS[k]}
+                </option>
+              ))}
             </Select>
             <p className="mt-1 text-xs text-muted">
-              New VMs start Preparing with a setup checklist.
+              Preparing opens a setup checklist. Active and Burned skip setup.
             </p>
           </Field>
           <Field label="Country">
@@ -958,19 +961,6 @@ export function MachinesView({
                 onBurned={() => {
                   startTransition(async () => {
                     const res = await markBurnedAction(selected.id);
-                    if (!res.ok) setError(res.error);
-                    else {
-                      router.push(`/wipeout?id=${selected.id}`);
-                      router.refresh();
-                    }
-                  });
-                }}
-                onExpireClosure={() => {
-                  startTransition(async () => {
-                    const res = await startClosureAction(
-                      selected.id,
-                      "EXPIRED",
-                    );
                     if (!res.ok) setError(res.error);
                     else {
                       router.push(`/wipeout?id=${selected.id}`);
@@ -1202,7 +1192,6 @@ function Overview({
   pending,
   onSave,
   onBurned,
-  onExpireClosure,
   onRotate,
   onMigrate,
   onContinueWipeout,
@@ -1224,7 +1213,6 @@ function Overview({
     notes?: string | null;
   }) => void;
   onBurned: () => void;
-  onExpireClosure: () => void;
   onRotate: () => void;
   onMigrate: () => void;
   onContinueWipeout: () => void;
@@ -1328,13 +1316,11 @@ function Overview({
       </Field>
       <Field label="Lifecycle">
         <Select name="lifecycleStatus" defaultValue={machine.lifecycleStatus}>
-          {Object.entries(LIFECYCLE_LABELS)
-            .filter(([k]) => k !== "ARCHIVED")
-            .map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
+          {LIFECYCLE_UI_STATUSES.filter((k) => k !== "ARCHIVED").map((k) => (
+            <option key={k} value={k}>
+              {LIFECYCLE_LABELS[k]}
+            </option>
+          ))}
         </Select>
       </Field>
       <Field label="Country">
@@ -1375,11 +1361,6 @@ function Overview({
             <Button type="button" variant="danger" onClick={onBurned}>
               Mark burned
             </Button>
-            {machine.lifecycleStatus === "EXPIRED" && !machine.closure ? (
-              <Button type="button" variant="outline" onClick={onExpireClosure}>
-                Start wipeout
-              </Button>
-            ) : null}
           </>
         )}
       </div>

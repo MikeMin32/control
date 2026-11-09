@@ -184,8 +184,24 @@ export async function createMachine(
     throw new AppError("Country must be a valid ISO 3166-1 alpha-2 code");
   }
 
-  // New VMs always start Preparing with a setup checklist snapshot
-  await ensureDefaultSetupTemplate();
+  const requested =
+    input.lifecycleStatus ?? LifecycleStatus.PREPARING;
+  const allowedCreate: LifecycleStatus[] = [
+    LifecycleStatus.PREPARING,
+    LifecycleStatus.ACTIVE,
+    LifecycleStatus.BURNED,
+  ];
+  if (!allowedCreate.includes(requested)) {
+    throw new AppError(
+      "New VMs may only be Preparing, Active, or Burned",
+      "INVALID_STATUS",
+    );
+  }
+
+  // Setup checklist only for Preparing — Active/Burned skip fabricated completion
+  if (requested === LifecycleStatus.PREPARING) {
+    await ensureDefaultSetupTemplate();
+  }
 
   return prisma.$transaction(async (tx) => {
     await assertNoActiveConflict(tx, input.serverId, input.vmid);
@@ -197,7 +213,7 @@ export async function createMachine(
           displayName: input.displayName?.trim() || null,
           serverId: input.serverId,
           companyId: input.companyId,
-          lifecycleStatus: LifecycleStatus.PREPARING,
+          lifecycleStatus: requested,
           internalIp: input.internalIp?.trim() || null,
           country,
           os: input.os?.trim() || null,
@@ -219,45 +235,49 @@ export async function createMachine(
       throw err;
     }
 
-    const template = await tx.checklistTemplate.findFirst({
-      where: { kind: ChecklistTemplateKind.SETUP, isDefault: true },
-      include: { items: { orderBy: { sortOrder: "asc" } } },
-    });
-    if (!template || template.items.length === 0) {
-      throw new AppError("No setup checklist template configured");
-    }
-
-    await tx.setupChecklist.create({
-      data: {
-        machineId: machine.id,
-        templateName: template.name,
-        actorId,
-        items: {
-          create: template.items.map((item) => ({
-            section: item.section || "VM",
-            label: item.label,
-            description: item.description,
-            required: item.required,
-            sortOrder: item.sortOrder,
-            status: ChecklistItemStatus.PENDING,
-          })),
-        },
-      },
-    });
-
     await logActivity(tx, {
       machineId: machine.id,
       actorId,
       type: "machine.created",
-      message: `Created VM ${machine.vmid}`,
+      message: `Created VM ${machine.vmid} (${requested})`,
     });
-    await logActivity(tx, {
-      machineId: machine.id,
-      actorId,
-      type: "setup.started",
-      message: "Started VM setup checklist",
-      metadata: { templateName: template.name },
-    });
+
+    if (requested === LifecycleStatus.PREPARING) {
+      const template = await tx.checklistTemplate.findFirst({
+        where: { kind: ChecklistTemplateKind.SETUP, isDefault: true },
+        include: { items: { orderBy: { sortOrder: "asc" } } },
+      });
+      if (!template || template.items.length === 0) {
+        throw new AppError("No setup checklist template configured");
+      }
+
+      await tx.setupChecklist.create({
+        data: {
+          machineId: machine.id,
+          templateName: template.name,
+          actorId,
+          items: {
+            create: template.items.map((item) => ({
+              section: item.section || "VM",
+              label: item.label,
+              description: item.description,
+              required: item.required,
+              sortOrder: item.sortOrder,
+              status: ChecklistItemStatus.PENDING,
+            })),
+          },
+        },
+      });
+
+      await logActivity(tx, {
+        machineId: machine.id,
+        actorId,
+        type: "setup.started",
+        message: "Started VM setup checklist",
+        metadata: { templateName: template.name },
+      });
+    }
+
     return machine;
   });
 }
@@ -289,6 +309,12 @@ export async function updateMachine(
     ) {
       throw new AppError(
         "Use complete closure to archive a machine",
+        "INVALID_STATUS",
+      );
+    }
+    if (input.lifecycleStatus === LifecycleStatus.EXPIRED) {
+      throw new AppError(
+        "Expired is no longer a valid lifecycle status",
         "INVALID_STATUS",
       );
     }

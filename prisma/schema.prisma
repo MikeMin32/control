@@ -131,12 +131,30 @@ model Machine {
   migrations      MachineMigration[]
   closure         ClosureChecklist?
   setupChecklist  SetupChecklist?
+  dolphinAccounts DolphinAccount[]
   activities      ActivityEvent[]
 
   @@index([serverId])
   @@index([companyId])
   @@index([lifecycleStatus])
   @@index([vmid])
+}
+
+model DolphinAccount {
+  id            String   @id @default(uuid()) @db.Uuid
+  accountName   String
+  machineId     String?  @db.Uuid
+  walletAddress String?
+  network       String?
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  machine Machine? @relation(fields: [machineId], references: [id], onDelete: SetNull)
+
+  @@index([accountName])
+  @@index([machineId])
+  @@index([walletAddress])
 }
 
 /// Partial unique: only one non-archived machine per server+vmid
@@ -232,13 +250,16 @@ model ChecklistTemplateItem {
 }
 
 model SetupChecklist {
-  id            String    @id @default(uuid()) @db.Uuid
-  machineId     String    @unique @db.Uuid
-  startedAt     DateTime  @default(now())
-  completedAt   DateTime?
-  completedById String?   @db.Uuid
-  templateName  String
-  actorId       String?   @db.Uuid
+  id                     String    @id @default(uuid()) @db.Uuid
+  machineId              String    @unique @db.Uuid
+  startedAt              DateTime  @default(now())
+  completedAt            DateTime?
+  completedById          String?   @db.Uuid
+  templateName           String
+  actorId                String?   @db.Uuid
+  completedWithOverride  Boolean   @default(false)
+  overrideNote           String?
+  overrideUnresolved     Json?
 
   machine     Machine              @relation(fields: [machineId], references: [id])
   completedBy User?                @relation("SetupClosedBy", fields: [completedById], references: [id])
@@ -266,15 +287,18 @@ model SetupChecklistItem {
 }
 
 model ClosureChecklist {
-  id              String         @id @default(uuid()) @db.Uuid
-  machineId       String         @unique @db.Uuid
-  reason          ClosureReason
-  reasonNote      String?
-  startedAt       DateTime       @default(now())
-  completedAt     DateTime?
-  completedById   String?        @db.Uuid
-  templateName    String
-  actorId         String?        @db.Uuid
+  id                     String         @id @default(uuid()) @db.Uuid
+  machineId              String         @unique @db.Uuid
+  reason                 ClosureReason
+  reasonNote             String?
+  startedAt              DateTime       @default(now())
+  completedAt            DateTime?
+  completedById          String?        @db.Uuid
+  templateName           String
+  actorId                String?        @db.Uuid
+  completedWithOverride  Boolean        @default(false)
+  overrideNote           String?
+  overrideUnresolved     Json?
 
   machine     Machine                 @relation(fields: [machineId], references: [id])
   completedBy User?                   @relation("ClosedBy", fields: [completedById], references: [id])

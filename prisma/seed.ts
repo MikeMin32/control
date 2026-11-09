@@ -188,12 +188,12 @@ async function main() {
     internalIp: "192.168.201.20",
     country: "NL",
   });
-  const mExpired = await ensureMachine("expired-220", {
+  const mShop = await ensureMachine("shop-220", {
     vmid: 220,
     serverId: s2.id,
     companyId: cGamma.id,
     displayName: "shop-gamma",
-    lifecycleStatus: LifecycleStatus.EXPIRED,
+    lifecycleStatus: LifecycleStatus.BURNED,
     country: "GB",
   });
   const mBurned = await ensureMachine("burned-305", {
@@ -228,7 +228,7 @@ async function main() {
   }
 
   await ensureOpenAssignment(mActive.id, pAssigned1.id);
-  await ensureOpenAssignment(mExpired.id, pAssigned2.id);
+  await ensureOpenAssignment(mShop.id, pAssigned2.id);
 
   // Historical rotation on active machine
   const histCount = await prisma.proxyAssignment.count({
@@ -310,6 +310,27 @@ async function main() {
   // Ensure prep has no assignment; touch unused refs
   void mPrep;
   void pAvail;
+
+  const dolphinCount = await prisma.dolphinAccount.count();
+  if (dolphinCount === 0) {
+    await prisma.dolphinAccount.create({
+      data: {
+        accountName: "alpha-eth",
+        machineId: mActive.id,
+        walletAddress: "0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb1",
+        network: "ETH",
+        notes: "Seed demo — no private keys",
+      },
+    });
+    await prisma.dolphinAccount.create({
+      data: {
+        accountName: "gamma-sol",
+        machineId: mShop.id,
+        walletAddress: "So11111111111111111111111111111111111111112",
+        network: "SOL",
+      },
+    });
+  }
 
   console.log("Seed complete (idempotent).");
 }

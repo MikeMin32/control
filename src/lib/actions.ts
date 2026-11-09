@@ -28,6 +28,8 @@ import * as proxies from "./services/proxies";
 import * as wipeout from "./services/wipeout";
 import * as setup from "./services/setup";
 import * as settings from "./services/settings";
+import * as dolphin from "./services/dolphin";
+import type { CompleteOverrideInput } from "./checklist-override";
 import { probeProxmox } from "./proxmox";
 
 function cookieOptions(token: string) {
@@ -272,11 +274,14 @@ export async function addCustomChecklistItemAction(
   }
 }
 
-export async function completeClosureAction(machineId: string) {
+export async function completeClosureAction(
+  machineId: string,
+  override: CompleteOverrideInput = {},
+) {
   try {
     await assertSameOrigin();
     const user = await requireUser();
-    await wipeout.completeClosure(machineId, user.id);
+    await wipeout.completeClosure(machineId, user.id, override);
     revalidatePath("/wipeout");
     revalidatePath("/archive");
     revalidatePath("/machines");
@@ -344,11 +349,68 @@ export async function updateSetupItemAction(
   }
 }
 
-export async function finishSetupAction(machineId: string) {
+export async function finishSetupAction(
+  machineId: string,
+  override: CompleteOverrideInput = {},
+) {
   try {
     await assertSameOrigin();
     const user = await requireUser();
-    await setup.finishSetup(machineId, user.id);
+    await setup.finishSetup(machineId, user.id, override);
+    revalidatePath("/machines");
+    return { ok: true as const };
+  } catch (err) {
+    return toActionResult(err);
+  }
+}
+
+export async function createDolphinAction(input: {
+  accountName: string;
+  machineId?: string | null;
+  walletAddress?: string | null;
+  network?: string | null;
+  notes?: string | null;
+}) {
+  try {
+    await assertSameOrigin();
+    const user = await requireUser();
+    const row = await dolphin.createDolphinAccount(input, user.id);
+    revalidatePath("/dolphin");
+    revalidatePath("/machines");
+    return { ok: true as const, id: row.id };
+  } catch (err) {
+    return toActionResult(err);
+  }
+}
+
+export async function updateDolphinAction(
+  id: string,
+  input: {
+    accountName: string;
+    machineId?: string | null;
+    walletAddress?: string | null;
+    network?: string | null;
+    notes?: string | null;
+  },
+) {
+  try {
+    await assertSameOrigin();
+    const user = await requireUser();
+    await dolphin.updateDolphinAccount(id, input, user.id);
+    revalidatePath("/dolphin");
+    revalidatePath("/machines");
+    return { ok: true as const };
+  } catch (err) {
+    return toActionResult(err);
+  }
+}
+
+export async function deleteDolphinAction(id: string) {
+  try {
+    await assertSameOrigin();
+    const user = await requireUser();
+    await dolphin.deleteDolphinAccount(id, user.id);
+    revalidatePath("/dolphin");
     revalidatePath("/machines");
     return { ok: true as const };
   } catch (err) {

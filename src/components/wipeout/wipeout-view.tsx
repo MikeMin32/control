@@ -83,6 +83,8 @@ export function WipeoutView({
   const [missingSelected, setMissingSelected] = useState<Record<string, boolean>>(
     {},
   );
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overrideNote, setOverrideNote] = useState("");
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   const closure = selected?.closure ?? null;
@@ -99,9 +101,39 @@ export function WipeoutView({
   }, [closure, optimistic]);
 
   const resolved = countResolved(items);
-  const remaining = requiredRemaining(items);
+  const unresolvedRequired = items.filter((i) => i.required && !isResolved(i));
+  const remaining = unresolvedRequired.length;
   const ready = canComplete(items);
   const readOnly = Boolean(closure?.completedAt);
+  const completedWithOverride = Boolean(
+    (closure as (ClosureChecklist & { completedWithOverride?: boolean }) | null)
+      ?.completedWithOverride,
+  );
+
+  function submitComplete(allowIncomplete: boolean) {
+    if (!selected) return;
+    setError(null);
+    startTransition(async () => {
+      const res = await completeClosureAction(
+        selected.id,
+        allowIncomplete
+          ? {
+              allowIncomplete: true,
+              overrideNote,
+              expectedUnresolvedIds: unresolvedRequired.map((i) => i.id),
+            }
+          : {},
+      );
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setOverrideOpen(false);
+      setOverrideNote("");
+      router.push("/archive");
+      router.refresh();
+    });
+  }
 
   useEffect(() => {
     setOptimistic({});
@@ -295,16 +327,14 @@ export function WipeoutView({
                 </div>
                 <Button
                   variant="primary"
-                  disabled={pending || !ready}
+                  disabled={pending}
                   onClick={() => {
-                    startTransition(async () => {
-                      const res = await completeClosureAction(selected.id);
-                      if (!res.ok) setError(res.error);
-                      else {
-                        router.push("/archive");
-                        router.refresh();
-                      }
-                    });
+                    if (ready) {
+                      submitComplete(false);
+                      return;
+                    }
+                    setOverrideNote("");
+                    setOverrideOpen(true);
                   }}
                 >
                   Complete closure
@@ -317,7 +347,11 @@ export function WipeoutView({
               ) : null}
             </div>
           ) : selected?.closure && readOnly ? (
-            <p className="text-sm text-muted">This closure is complete.</p>
+            <p className="text-sm text-muted">
+              {completedWithOverride
+                ? "Completed with unfinished tasks — archived."
+                : "This closure is complete."}
+            </p>
           ) : null
         }
       >
@@ -725,6 +759,47 @@ export function WipeoutView({
             ))}
           </ul>
         )}
+      </Dialog>
+
+      <Dialog
+        open={overrideOpen}
+        onClose={() => setOverrideOpen(false)}
+        title="Complete with unfinished tasks?"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setOverrideOpen(false)}>
+              Go back
+            </Button>
+            <Button
+              variant="primary"
+              disabled={pending}
+              onClick={() => submitComplete(true)}
+            >
+              Complete anyway
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <p>
+            {remaining} required task{remaining === 1 ? "" : "s"} still open.
+            Completing will archive this VM and leave those items Pending —
+            they will not be marked N/A.
+          </p>
+          <ul className="list-disc space-y-1 pl-5 text-ink">
+            {unresolvedRequired.map((item) => (
+              <li key={item.id}>{item.label}</li>
+            ))}
+          </ul>
+          <Field label="Note (optional)">
+            <Textarea
+              rows={2}
+              value={overrideNote}
+              onChange={(e) => setOverrideNote(e.target.value)}
+              placeholder="Why completing early"
+            />
+          </Field>
+        </div>
       </Dialog>
     </div>
   );

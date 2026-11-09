@@ -15,6 +15,12 @@ import {
   isSimilarEmailWipeoutTask,
   normalizeChecklistLabel,
 } from "../checklist-defaults";
+import {
+  listUnresolvedRequired,
+  sameUnresolvedSet,
+  type CompleteOverrideInput,
+} from "../checklist-override";
+import type { Prisma } from "@prisma/client";
 
 /**
  * Ensure the default wipeout template exists and includes current canonical
@@ -295,15 +301,14 @@ export async function startClosure(
       throw new AppError("No wipeout checklist template configured");
     }
 
+    // ClosureReason.EXPIRED retained historically; maps to Burned like other non-Burned reasons
     const nextStatus =
-      input.reason === ClosureReason.BURNED
+      input.reason === ClosureReason.BURNED ||
+      input.reason === ClosureReason.EXPIRED ||
+      machine.lifecycleStatus === LifecycleStatus.ACTIVE ||
+      machine.lifecycleStatus === LifecycleStatus.PREPARING
         ? LifecycleStatus.BURNED
-        : input.reason === ClosureReason.EXPIRED
-          ? LifecycleStatus.EXPIRED
-          : machine.lifecycleStatus === LifecycleStatus.ACTIVE ||
-              machine.lifecycleStatus === LifecycleStatus.PREPARING
-            ? LifecycleStatus.BURNED
-            : machine.lifecycleStatus;
+        : machine.lifecycleStatus;
 
     await tx.machine.update({
       where: { id: machineId },
@@ -488,8 +493,13 @@ function assertChecklistReady(
 
 /**
  * Final closure: archive VM, end remaining proxy assignment, preserve billing + history.
+ * Incomplete required items need allowIncomplete + matching expectedUnresolvedIds.
  */
-export async function completeClosure(machineId: string, actorId: string) {
+export async function completeClosure(
+  machineId: string,
+  actorId: string,
+  override: CompleteOverrideInput = {},
+) {
   return prisma.$transaction(async (tx) => {
     const machine = await tx.machine.findUnique({
       where: { id: machineId },
@@ -506,9 +516,28 @@ export async function completeClosure(machineId: string, actorId: string) {
       throw new AppError("Closure already completed", "CLOSURE_DONE", 409);
     }
 
-    assertChecklistReady(machine.closure.items);
+    const unresolved = listUnresolvedRequired(machine.closure.items);
+    if (unresolved.length > 0) {
+      if (!override.allowIncomplete) {
+        throw new AppError(
+          "All required checklist items must be completed or marked N/A",
+          "CHECKLIST_INCOMPLETE",
+          409,
+        );
+      }
+      if (!sameUnresolvedSet(override.expectedUnresolvedIds, unresolved)) {
+        throw new AppError(
+          "Unresolved tasks changed — review the checklist and confirm again",
+          "OVERRIDE_CONFLICT",
+          409,
+        );
+      }
+    } else if (!override.allowIncomplete) {
+      assertChecklistReady(machine.closure.items);
+    }
 
     const now = new Date();
+    const withOverride = unresolved.length > 0;
 
     for (const a of machine.proxyAssignments) {
       await tx.proxyAssignment.update({
@@ -524,7 +553,17 @@ export async function completeClosure(machineId: string, actorId: string) {
 
     await tx.closureChecklist.update({
       where: { id: machine.closure.id },
-      data: { completedAt: now, completedById: actorId },
+      data: {
+        completedAt: now,
+        completedById: actorId,
+        completedWithOverride: withOverride,
+        overrideNote: withOverride
+          ? override.overrideNote?.trim() || null
+          : null,
+        overrideUnresolved: withOverride
+          ? (unresolved as unknown as Prisma.InputJsonValue)
+          : undefined,
+      },
     });
 
     const updated = await tx.machine.update({
@@ -538,8 +577,16 @@ export async function completeClosure(machineId: string, actorId: string) {
     await logActivity(tx, {
       machineId,
       actorId,
-      type: "closure.completed",
-      message: "Completed wipeout and archived VM",
+      type: withOverride ? "closure.completed_override" : "closure.completed",
+      message: withOverride
+        ? `Completed wipeout with ${unresolved.length} unfinished required task(s) and archived VM`
+        : "Completed wipeout and archived VM",
+      metadata: withOverride
+        ? {
+            unresolved,
+            note: override.overrideNote?.trim() || null,
+          }
+        : undefined,
     });
 
     return updated;

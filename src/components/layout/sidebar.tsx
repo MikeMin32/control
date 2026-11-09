@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   Archive,
   Eraser,
+  Fish,
   Menu,
   Monitor,
   Settings,
@@ -18,6 +19,7 @@ import { BrandMark } from "@/components/ui/brand-mark";
 
 const NAV = [
   { href: "/machines", label: "Machines", icon: Monitor },
+  { href: "/dolphin", label: "Dolphin", icon: Fish },
   { href: "/proxies", label: "Proxies", icon: Share2 },
   { href: "/wipeout", label: "Wipeout", icon: Eraser },
   { href: "/archive", label: "Archive", icon: Archive },

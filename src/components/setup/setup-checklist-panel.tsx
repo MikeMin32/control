@@ -53,6 +53,8 @@ export function SetupChecklistPanel({
   const [noteDraft, setNoteDraft] = useState("");
   const [naItem, setNaItem] = useState<SetupChecklistItem | null>(null);
   const [naDraft, setNaDraft] = useState("");
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overrideNote, setOverrideNote] = useState("");
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   const items = useMemo(() => {
@@ -67,9 +69,37 @@ export function SetupChecklistPanel({
   }, [checklist.items, optimistic]);
 
   const resolved = items.filter(isResolved).length;
-  const remaining = items.filter((i) => i.required && !isResolved(i)).length;
+  const unresolvedRequired = items.filter((i) => i.required && !isResolved(i));
+  const remaining = unresolvedRequired.length;
   const ready = remaining === 0;
   const locked = Boolean(readOnly || checklist.completedAt);
+  const completedWithOverride = Boolean(
+    (checklist as SetupChecklist & { completedWithOverride?: boolean })
+      .completedWithOverride,
+  );
+
+  function submitFinish(allowIncomplete: boolean) {
+    setError(null);
+    startTransition(async () => {
+      const res = await finishSetupAction(
+        machineId,
+        allowIncomplete
+          ? {
+              allowIncomplete: true,
+              overrideNote,
+              expectedUnresolvedIds: unresolvedRequired.map((i) => i.id),
+            }
+          : {},
+      );
+      if (!res.ok) {
+        setError(res.error);
+        return;
+      }
+      setOverrideOpen(false);
+      setOverrideNote("");
+      router.refresh();
+    });
+  }
 
   const firstUnfinishedSection = SETUP_SECTIONS.find((section) =>
     items.some((i) => i.section === section && !isResolved(i)),
@@ -129,7 +159,11 @@ export function SetupChecklistPanel({
           <span className="font-medium text-ink">Setup progress</span>
           <span className="text-muted">
             {resolved} of {items.length}
-            {checklist.completedAt ? " · finished" : ""}
+            {checklist.completedAt
+              ? completedWithOverride
+                ? " · completed with unfinished tasks"
+                : " · finished"
+              : ""}
           </span>
         </div>
         <ProgressBar value={resolved} max={items.length || 1} />
@@ -145,7 +179,11 @@ export function SetupChecklistPanel({
             {resolved} of {items.length} resolved
           </span>
           {checklist.completedAt ? (
-            <span className="text-xs text-muted">Finished</span>
+            <span className="text-xs text-muted">
+              {completedWithOverride
+                ? "Completed with unfinished tasks"
+                : "Finished"}
+            </span>
           ) : null}
         </div>
         <ProgressBar value={resolved} max={items.length || 1} />
@@ -386,13 +424,14 @@ export function SetupChecklistPanel({
             </div>
             <Button
               variant="primary"
-              disabled={pending || !ready}
+              disabled={pending}
               onClick={() => {
-                startTransition(async () => {
-                  const res = await finishSetupAction(machineId);
-                  if (!res.ok) setError(res.error);
-                  else router.refresh();
-                });
+                if (ready) {
+                  submitFinish(false);
+                  return;
+                }
+                setOverrideNote("");
+                setOverrideOpen(true);
               }}
             >
               Finish setup
@@ -409,6 +448,47 @@ export function SetupChecklistPanel({
           {error}
         </p>
       ) : null}
+
+      <Dialog
+        open={overrideOpen}
+        onClose={() => setOverrideOpen(false)}
+        title="Complete with unfinished tasks?"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setOverrideOpen(false)}>
+              Go back
+            </Button>
+            <Button
+              variant="primary"
+              disabled={pending}
+              onClick={() => submitFinish(true)}
+            >
+              Complete anyway
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-3 text-sm">
+          <p>
+            {remaining} required task{remaining === 1 ? "" : "s"} still open.
+            Completing will mark this VM Active (if Preparing) and leave those
+            items Pending — they will not be marked N/A.
+          </p>
+          <ul className="list-disc space-y-1 pl-5 text-ink">
+            {unresolvedRequired.map((item) => (
+              <li key={item.id}>{item.label}</li>
+            ))}
+          </ul>
+          <Field label="Note (optional)">
+            <Textarea
+              rows={2}
+              value={overrideNote}
+              onChange={(e) => setOverrideNote(e.target.value)}
+              placeholder="Why completing early"
+            />
+          </Field>
+        </div>
+      </Dialog>
 
       <Dialog
         open={Boolean(noteItem)}
