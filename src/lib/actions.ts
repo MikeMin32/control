@@ -118,7 +118,8 @@ export async function updateMachineAction(
     const user = await requireUser();
     await machines.updateMachine(id, input, user.id);
     revalidatePath("/machines");
-    revalidatePath(`/machines`);
+    revalidatePath("/proxies");
+    revalidatePath("/dolphin");
     return { ok: true as const };
   } catch (err) {
     return toActionResult(err);

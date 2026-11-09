@@ -956,6 +956,8 @@ export function MachinesView({
             {tab === "overview" ? (
               <Overview
                 machine={selected}
+                servers={servers}
+                availableProxies={availableProxies}
                 timezone={timezone}
                 pending={pending}
                 onValidationError={(msg) => setError(msg)}
@@ -963,8 +965,23 @@ export function MachinesView({
                   setError(null);
                   startTransition(async () => {
                     const res = await updateMachineAction(selected.id, input);
-                    if (!res.ok) setError(res.error);
-                    else router.refresh();
+                    if (!res.ok) {
+                      setError(res.error);
+                      return;
+                    }
+                    // Keep drawer open; if server filter would hide the VM, follow it.
+                    if (
+                      input.serverId &&
+                      initialServerId &&
+                      input.serverId !== initialServerId
+                    ) {
+                      const sp = new URLSearchParams(searchParams.toString());
+                      sp.set("serverId", input.serverId);
+                      sp.set("id", selected.id);
+                      router.push(`/machines?${sp.toString()}`);
+                    } else {
+                      router.refresh();
+                    }
                   });
                 }}
                 onBurned={() => {
@@ -1187,6 +1204,8 @@ function Pagination({
 
 function Overview({
   machine,
+  servers,
+  availableProxies,
   timezone,
   pending,
   onSave,
@@ -1200,6 +1219,8 @@ function Overview({
   error,
 }: {
   machine: DetailMachine;
+  servers: Server[];
+  availableProxies: Proxy[];
   timezone: string;
   pending: boolean;
   onSave: (input: {
@@ -1208,8 +1229,9 @@ function Overview({
     lifecycleStatus?: LifecycleStatus;
     internalIp?: string | null;
     country?: string | null;
-    os?: string | null;
     notes?: string | null;
+    serverId?: string;
+    proxyId?: string | null;
   }) => void;
   onValidationError: (message: string) => void;
   onBurned: () => void;
@@ -1225,6 +1247,25 @@ function Overview({
   const openSetup = Boolean(
     machine.setupChecklist && !machine.setupChecklist.completedAt,
   );
+  const serverOptions = useMemo(() => {
+    const active = servers.filter((s) => !s.retiredAt);
+    if (
+      machine.server &&
+      machine.server.retiredAt &&
+      !active.some((s) => s.id === machine.serverId)
+    ) {
+      return [machine.server, ...active];
+    }
+    return active;
+  }, [servers, machine.server, machine.serverId]);
+  const proxyOptions = useMemo(() => {
+    const byId = new Map(availableProxies.map((p) => [p.id, p]));
+    if (current && !byId.has(current.id)) byId.set(current.id, current);
+    return Array.from(byId.values()).sort((a, b) =>
+      a.ip.localeCompare(b.ip),
+    );
+  }, [availableProxies, current]);
+
   return (
     <form
       key={machine.id}
@@ -1237,29 +1278,27 @@ function Overview({
           onValidationError("Internal IP must be a valid IPv4 address");
           return;
         }
+        const serverId = String(fd.get("serverId") || "");
+        if (!serverId) {
+          onValidationError("Server is required");
+          return;
+        }
         onSave({
           displayName: String(fd.get("displayName") || "") || null,
           company: String(fd.get("company") || "") || null,
           lifecycleStatus: String(fd.get("lifecycleStatus")) as LifecycleStatus,
           internalIp: internalIpRaw || null,
           country: String(fd.get("country") || "") || null,
-          os: String(fd.get("os") || "") || null,
           notes: String(fd.get("notes") || "") || null,
+          serverId,
+          proxyId: String(fd.get("proxyId") || "") || null,
         });
       }}
     >
       <div className="grid grid-cols-2 gap-3 text-sm">
         <div>
-          <div className="text-xs text-muted">Server</div>
-          <div>{machine.server.name}</div>
-        </div>
-        <div>
           <div className="text-xs text-muted">Created</div>
           <div>{formatDate(machine.createdAt, timezone)}</div>
-        </div>
-        <div>
-          <div className="text-xs text-muted">Current proxy</div>
-          <div className="font-mono text-xs">{current?.ip || ""}</div>
         </div>
         <div>
           <div className="text-xs text-muted">Status</div>
@@ -1274,7 +1313,7 @@ function Overview({
           <div>
             {machine.country
               ? `${countryName(machine.country) ?? machine.country}`
-              : "—"}
+              : ""}
           </div>
         </div>
       </div>
@@ -1308,6 +1347,15 @@ function Overview({
       ) : machine.lifecycleStatus === "ACTIVE" ? (
         <p className="text-xs text-muted">No setup checklist recorded.</p>
       ) : null}
+      <Field label="Server">
+        <Select name="serverId" required defaultValue={machine.serverId}>
+          {serverOptions.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </Select>
+      </Field>
       <Field label="Display name">
         <Input name="displayName" defaultValue={machine.displayName || ""} />
       </Field>
@@ -1333,8 +1381,15 @@ function Overview({
           initialMode="manual"
           initialValue={machine.internalIp || ""}
         />
-        <Field label="OS">
-          <Input name="os" defaultValue={machine.os || ""} />
+        <Field label="Proxy">
+          <Select name="proxyId" defaultValue={current?.id || ""}>
+            <option value="" />
+            {proxyOptions.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.ip} · {p.provider}
+              </option>
+            ))}
+          </Select>
         </Field>
       </div>
       <Field label="Notes">
