@@ -160,6 +160,7 @@ export async function createProxyAction(
     const user = await requireUser();
     const proxy = await proxies.createProxy(input, user.id);
     revalidatePath("/proxies");
+    revalidatePath("/dolphin");
     return { ok: true as const, id: proxy.id };
   } catch (err) {
     return toActionResult(err);
@@ -176,6 +177,22 @@ export async function rotateProxyAction(
     await proxies.rotateProxy(machineId, input, user.id);
     revalidatePath("/machines");
     revalidatePath("/proxies");
+    return { ok: true as const };
+  } catch (err) {
+    return toActionResult(err);
+  }
+}
+
+export async function rotateDolphinConnectionProxyAction(
+  dolphinId: string,
+  input: { proxyId: string; reason: string },
+) {
+  try {
+    await assertSameOrigin();
+    const user = await requireUser();
+    await proxies.rotateDolphinConnectionProxy(dolphinId, input, user.id);
+    revalidatePath("/proxies");
+    revalidatePath("/dolphin");
     return { ok: true as const };
   } catch (err) {
     return toActionResult(err);
@@ -414,6 +431,21 @@ export async function deleteDolphinAction(id: string) {
     await dolphin.deleteDolphinAccount(id, user.id);
     revalidatePath("/dolphin");
     revalidatePath("/machines");
+    revalidatePath("/proxies");
+    return { ok: true as const };
+  } catch (err) {
+    return toActionResult(err);
+  }
+}
+
+export async function retireDolphinAction(id: string) {
+  try {
+    await assertSameOrigin();
+    const user = await requireUser();
+    await dolphin.retireDolphinAccount(id, user.id);
+    revalidatePath("/dolphin");
+    revalidatePath("/machines");
+    revalidatePath("/proxies");
     return { ok: true as const };
   } catch (err) {
     return toActionResult(err);

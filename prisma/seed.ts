@@ -9,6 +9,7 @@ import {
   LifecycleStatus,
   PrismaClient,
   ProxyAvailability,
+  ProxyKind,
 } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
@@ -69,6 +70,18 @@ async function main() {
     );
   }
 
+  // Purchase-source Dolphin for seeded VM proxies (many:1)
+  const purchaseDolphin =
+    (await prisma.dolphinAccount.findFirst({
+      where: { accountName: "Purchase hub" },
+    })) ??
+    (await prisma.dolphinAccount.create({
+      data: {
+        accountName: "Purchase hub",
+        notes: "Seed purchase-source Dolphin for VM proxies",
+      },
+    }));
+
   // Proxies
   async function upsertProxy(
     ip: string,
@@ -79,17 +92,30 @@ async function main() {
       renewalDate?: Date;
       city?: string;
       country?: string;
+      kind?: ProxyKind;
+      purchaseSourceDolphinId?: string | null;
     },
   ) {
+    const kind = data.kind ?? ProxyKind.VM;
     return prisma.proxy.upsert({
       where: { ip_provider: { ip, provider } },
       update: {
         availability: data.availability,
         billingStatus: data.billingStatus,
+        kind,
+        purchaseSourceDolphinId:
+          kind === ProxyKind.VM
+            ? (data.purchaseSourceDolphinId ?? purchaseDolphin.id)
+            : null,
       },
       create: {
         ip,
         provider,
+        kind,
+        purchaseSourceDolphinId:
+          kind === ProxyKind.VM
+            ? (data.purchaseSourceDolphinId ?? purchaseDolphin.id)
+            : null,
         availability: data.availability,
         billingStatus: data.billingStatus,
         renewalDate: data.renewalDate,
@@ -353,12 +379,33 @@ async function main() {
     network: "ETH",
     notes: "Seed demo — no private keys",
   });
-  await ensureDolphin("gamma-sol", {
+  const gammaDolphin = await ensureDolphin("gamma-sol", {
     machineId: mShop.id,
     wallet: null,
     walletAddress: "So11111111111111111111111111111111111111112",
     network: "SOL",
   });
+
+  // Dolphin-kind connection proxy demo
+  const dolphinProxy = await upsertProxy("198.51.100.80", "DolphinNet", {
+    availability: ProxyAvailability.ASSIGNED,
+    billingStatus: BillingStatus.ACTIVE,
+    kind: ProxyKind.DOLPHIN,
+    city: "Riga",
+    country: "LV",
+  });
+  const openConn = await prisma.dolphinProxyAssignment.findFirst({
+    where: { dolphinId: gammaDolphin.id, endedAt: null },
+  });
+  if (!openConn) {
+    await prisma.dolphinProxyAssignment.create({
+      data: {
+        dolphinId: gammaDolphin.id,
+        proxyId: dolphinProxy.id,
+        reason: "seed",
+      },
+    });
+  }
 
   console.log("Seed complete (idempotent).");
 }

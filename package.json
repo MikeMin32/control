@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3001 -H 127.0.0.1",
-    "build": "node scripts/assert-dev-not-using-next-dir.mjs && prisma generate && NEXT_DIST_DIR=.next-build next build",
+    "build": "NEXT_DIST_DIR=.next-build node scripts/assert-dev-not-using-next-dir.mjs && prisma generate && NEXT_DIST_DIR=.next-build next build",
     "start": "NEXT_DIST_DIR=.next-build next start -p 3001 -H 127.0.0.1",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",

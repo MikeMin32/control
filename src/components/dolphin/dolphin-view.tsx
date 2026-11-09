@@ -12,7 +12,9 @@ import { Copy, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import type {
   Company,
   DolphinAccount,
+  DolphinProxyAssignment,
   Machine,
+  Proxy,
   Server,
 } from "@prisma/client";
 import { Button } from "@/components/ui/button";
@@ -22,6 +24,7 @@ import { CountryFlag } from "@/components/ui/country-flag";
 import {
   createDolphinAction,
   deleteDolphinAction,
+  retireDolphinAction,
   updateDolphinAction,
 } from "@/lib/actions";
 import { StatusPill } from "@/components/ui/status-pill";
@@ -36,6 +39,8 @@ type MachineOption = Machine & { server: Server; company: Company };
 
 type AccountRow = DolphinAccount & {
   machine: MachineOption | null;
+  proxyAssignments: (DolphinProxyAssignment & { proxy: Proxy })[];
+  _count: { purchaseSourceProxies: number; proxyAssignments: number };
 };
 
 /** `101 · Alpha Labs · [flag]` — VMID + company + flag only. */
@@ -78,7 +83,15 @@ export function DolphinView({
   const [addOpen, setAddOpen] = useState(false);
   const [editRow, setEditRow] = useState<AccountRow | null>(null);
   const [deleteRow, setDeleteRow] = useState<AccountRow | null>(null);
+  const [retireRow, setRetireRow] = useState<AccountRow | null>(null);
   const [copyToast, setCopyToast] = useState<string | null>(null);
+
+  function isReferenced(row: AccountRow) {
+    return (
+      row._count.purchaseSourceProxies > 0 ||
+      row._count.proxyAssignments > 0
+    );
+  }
 
   const machineOptions = useMemo(
     () =>
@@ -111,7 +124,8 @@ export function DolphinView({
         <div>
           <h1 className="page-title">Dolphin</h1>
           <p className="page-subtitle">
-            Manage Dolphin accounts, linked VMs, and wallets.
+            Manage Dolphin accounts, connection proxies, linked VMs, and
+            wallets.
           </p>
         </div>
         <Button variant="primary" onClick={() => setAddOpen(true)}>
@@ -147,6 +161,7 @@ export function DolphinView({
           <thead className="table-head">
             <tr>
               <th className="px-4 py-3 font-medium">Account name</th>
+              <th className="px-4 py-3 font-medium">Proxy</th>
               <th className="px-4 py-3 font-medium">Linked VM</th>
               <th className="px-4 py-3 font-medium">Wallet</th>
               <th className="px-4 py-3 font-medium">Address</th>
@@ -158,17 +173,48 @@ export function DolphinView({
             {accounts.length === 0 ? (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className="px-4 py-8 text-center text-sm text-muted"
                 >
                   No Dolphin accounts yet.
                 </td>
               </tr>
             ) : (
-              accounts.map((row) => (
+              accounts.map((row) => {
+                const connection = row.proxyAssignments[0];
+                const purchaseCount = row._count.purchaseSourceProxies;
+                return (
                 <tr key={row.id} className="border-b border-line last:border-0">
                   <td className="px-4 py-3 font-medium text-ink">
                     {row.accountName}
+                  </td>
+                  <td className="px-4 py-3">
+                    {connection ? (
+                      <div className="space-y-0.5">
+                        <Link
+                          href="/proxies?tab=dolphin"
+                          className="font-mono text-xs text-ink underline-offset-2 hover:underline"
+                        >
+                          {connection.proxy.ip}
+                        </Link>
+                        {purchaseCount > 0 ? (
+                          <div className="text-xs text-muted">
+                            Purchase source for {purchaseCount} VM prox
+                            {purchaseCount === 1 ? "y" : "ies"}
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : purchaseCount > 0 ? (
+                      <div className="space-y-0.5">
+                        <span className="text-muted">—</span>
+                        <div className="text-xs text-muted">
+                          Purchase source for {purchaseCount} VM prox
+                          {purchaseCount === 1 ? "y" : "ies"}
+                        </div>
+                      </div>
+                    ) : (
+                      <span className="text-muted">—</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">
                     {row.machine ? (
@@ -232,10 +278,15 @@ export function DolphinView({
                       <Button
                         size="sm"
                         variant="ghost"
-                        aria-label={`Delete ${row.accountName}`}
+                        aria-label={
+                          isReferenced(row)
+                            ? `Retire ${row.accountName}`
+                            : `Delete ${row.accountName}`
+                        }
                         onClick={() => {
                           setError(null);
-                          setDeleteRow(row);
+                          if (isReferenced(row)) setRetireRow(row);
+                          else setDeleteRow(row);
                         }}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -243,7 +294,8 @@ export function DolphinView({
                     </div>
                   </td>
                 </tr>
-              ))
+              );
+              })
             )}
           </tbody>
         </table>
@@ -334,6 +386,45 @@ export function DolphinView({
           Delete{" "}
           <span className="font-medium">{deleteRow?.accountName}</span>? This
           does not delete the linked VM.
+        </p>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(retireRow)}
+        onClose={() => setRetireRow(null)}
+        title="Retire Dolphin account?"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setRetireRow(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              disabled={pending || !retireRow}
+              onClick={() => {
+                if (!retireRow) return;
+                setError(null);
+                startTransition(async () => {
+                  const res = await retireDolphinAction(retireRow.id);
+                  if (!res.ok) {
+                    setError(res.error);
+                    return;
+                  }
+                  setRetireRow(null);
+                  router.refresh();
+                });
+              }}
+            >
+              Retire account
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm text-ink">
+          Retire{" "}
+          <span className="font-medium">{retireRow?.accountName}</span>? It is
+          referenced by proxies, so it cannot be deleted. Purchase-source links
+          are kept; any open connection proxy is released.
         </p>
       </Dialog>
     </div>

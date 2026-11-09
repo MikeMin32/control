@@ -3,6 +3,7 @@ import {
   listDolphinAccounts,
   listLinkableMachines,
 } from "@/lib/services/dolphin";
+import { serializeProxy } from "@/lib/utils";
 
 export default async function DolphinPage({
   searchParams,
@@ -15,9 +16,17 @@ export default async function DolphinPage({
     listLinkableMachines(),
   ]);
 
+  const serialized = accounts.map((row) => ({
+    ...row,
+    proxyAssignments: row.proxyAssignments.map((a) => ({
+      ...a,
+      proxy: serializeProxy(a.proxy),
+    })),
+  }));
+
   return (
     <DolphinView
-      accounts={accounts}
+      accounts={serialized}
       machines={machines}
       initialQ={sp.q || ""}
     />

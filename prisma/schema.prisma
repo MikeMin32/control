@@ -21,6 +21,12 @@ enum ProxyAvailability {
   RETIRED
 }
 
+/// VM proxies rotate onto machines; DOLPHIN proxies assign as Dolphin connection proxies.
+enum ProxyKind {
+  VM
+  DOLPHIN
+}
+
 enum BillingStatus {
   ACTIVE
   CANCELLATION_PENDING
@@ -141,24 +147,30 @@ model Machine {
 }
 
 model DolphinAccount {
-  id            String   @id @default(uuid()) @db.Uuid
+  id            String    @id @default(uuid()) @db.Uuid
   accountName   String
-  machineId     String?  @db.Uuid
+  machineId     String?   @db.Uuid
   /// Optional human label for the wallet (not the address).
   wallet        String?
   /// Public wallet address (migrated from prior walletAddress values).
   walletAddress String?
   network       String?
   notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  retiredAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  machine Machine? @relation(fields: [machineId], references: [id], onDelete: SetNull)
+  machine               Machine?                 @relation(fields: [machineId], references: [id], onDelete: SetNull)
+  /// VM proxies purchased through this Dolphin (many:1).
+  purchaseSourceProxies Proxy[]                  @relation("VmProxyPurchaseSource")
+  /// Connection-proxy assignment history (current = endedAt null).
+  proxyAssignments      DolphinProxyAssignment[]
 
   @@index([accountName])
   @@index([machineId])
   @@index([wallet])
   @@index([walletAddress])
+  @@index([retiredAt])
 }
 
 /// Partial unique: only one non-archived machine per server+vmid
@@ -183,29 +195,37 @@ model MachineMigration {
 }
 
 model Proxy {
-  id               String            @id @default(uuid()) @db.Uuid
-  ip               String
-  provider         String
-  endpointHostname String?
-  endpointPort     Int?
-  country          String?
-  region           String?
-  city             String?
-  renewalDate      DateTime?         @db.Date
-  monthlyCost      Decimal?          @db.Decimal(10, 2)
-  currency         String?           @default("USD")
-  notes            String?
-  availability     ProxyAvailability @default(AVAILABLE)
-  billingStatus    BillingStatus     @default(ACTIVE)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  id                      String            @id @default(uuid()) @db.Uuid
+  ip                      String
+  provider                String
+  kind                    ProxyKind         @default(VM)
+  /// Required for new VM proxies: Dolphin used as purchase source (many VM proxies → one Dolphin).
+  /// Legacy rows may be null after migration.
+  purchaseSourceDolphinId String?           @db.Uuid
+  endpointHostname        String?
+  endpointPort            Int?
+  country                 String?
+  region                  String?
+  city                    String?
+  renewalDate             DateTime?         @db.Date
+  monthlyCost             Decimal?          @db.Decimal(10, 2)
+  currency                String?           @default("USD")
+  notes                   String?
+  availability            ProxyAvailability @default(AVAILABLE)
+  billingStatus           BillingStatus     @default(ACTIVE)
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
 
-  assignments ProxyAssignment[]
+  purchaseSourceDolphin DolphinAccount?         @relation("VmProxyPurchaseSource", fields: [purchaseSourceDolphinId], references: [id], onDelete: Restrict)
+  assignments           ProxyAssignment[]
+  dolphinAssignments    DolphinProxyAssignment[]
 
   @@unique([ip, provider])
   @@index([availability])
   @@index([billingStatus])
+  @@index([kind])
   @@index([ip])
+  @@index([purchaseSourceDolphinId])
 }
 
 model ProxyAssignment {
@@ -224,8 +244,26 @@ model ProxyAssignment {
   @@index([proxyId, endedAt])
 }
 
+/// Connection-proxy history for Dolphin accounts (DOLPHIN-kind proxies only).
+model DolphinProxyAssignment {
+  id        String    @id @default(uuid()) @db.Uuid
+  dolphinId String    @db.Uuid
+  proxyId   String    @db.Uuid
+  startedAt DateTime  @default(now())
+  endedAt   DateTime?
+  reason    String?
+  actorId   String?   @db.Uuid
+
+  dolphin DolphinAccount @relation(fields: [dolphinId], references: [id])
+  proxy   Proxy          @relation(fields: [proxyId], references: [id])
+
+  @@index([dolphinId, endedAt])
+  @@index([proxyId, endedAt])
+}
+
 /// At most one open assignment per proxy — partial unique WHERE ended_at IS NULL
 /// At most one open assignment per machine — partial unique WHERE ended_at IS NULL
+/// At most one open Dolphin connection assignment per proxy / per Dolphin — same pattern
 
 model ChecklistTemplate {
   id        String                @id @default(uuid()) @db.Uuid

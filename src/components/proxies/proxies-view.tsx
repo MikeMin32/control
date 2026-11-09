@@ -1,9 +1,18 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
-import type { Proxy, ProxyAssignment, Machine, Server, Company } from "@prisma/client";
+import type {
+  DolphinAccount,
+  DolphinProxyAssignment,
+  Proxy,
+  ProxyAssignment,
+  Machine,
+  Server,
+  Company,
+} from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
@@ -11,6 +20,7 @@ import { StatusPill } from "@/components/ui/status-pill";
 import {
   createProxyAction,
   retireProxyAction,
+  rotateDolphinConnectionProxyAction,
   updateProxyBillingAction,
 } from "@/lib/actions";
 import {
@@ -21,21 +31,32 @@ import {
 } from "@/lib/labels";
 import { cn, formatCalendarDateLong } from "@/lib/utils";
 
+type ProxyTab = "vm" | "dolphin";
+
 type Row = Proxy & {
+  purchaseSourceDolphin: DolphinAccount | null;
   assignments: (ProxyAssignment & {
     machine: Machine & { server: Server; company: Company };
+  })[];
+  dolphinAssignments: (DolphinProxyAssignment & {
+    dolphin: DolphinAccount;
   })[];
 };
 
 export function ProxiesView({
+  tab,
   proxies,
   pendingCancellations,
+  dolphins,
 }: {
+  tab: ProxyTab;
   proxies: Row[];
   pendingCancellations: Proxy[];
+  dolphins: DolphinAccount[];
 }) {
   const router = useRouter();
   const [addOpen, setAddOpen] = useState(false);
+  const [assignRow, setAssignRow] = useState<Row | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [filter, setFilter] = useState("ALL");
@@ -45,20 +66,56 @@ export function ProxiesView({
       ? proxies
       : proxies.filter((p) => p.availability === filter);
 
+  function setTab(next: ProxyTab) {
+    setFilter("ALL");
+    setError(null);
+    router.push(next === "vm" ? "/proxies" : "/proxies?tab=dolphin");
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="page-title">Proxies</h1>
           <p className="page-subtitle">
-            Inventory of proxy IPs. Rotate records history only — billing is
-            independent.
+            {tab === "vm"
+              ? "VM proxies rotate onto machines. Purchase-source Dolphin is required on create."
+              : "Dolphin proxies assign as connection proxies (one current per account)."}
           </p>
         </div>
-        <Button variant="primary" onClick={() => setAddOpen(true)}>
+        <Button
+          variant="primary"
+          onClick={() => {
+            setError(null);
+            setAddOpen(true);
+          }}
+        >
           <Plus className="h-4 w-4" />
-          Add proxy
+          {tab === "vm" ? "Add VM proxy" : "Add Dolphin proxy"}
         </Button>
+      </div>
+
+      <div className="flex flex-wrap gap-2 border-b border-line pb-0">
+        {(
+          [
+            { id: "vm" as const, label: "VM" },
+            { id: "dolphin" as const, label: "Dolphin" },
+          ] as const
+        ).map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            className={cn(
+              "-mb-px border-b-2 px-3 py-2 text-sm transition",
+              tab === t.id
+                ? "border-ink font-medium text-ink"
+                : "border-transparent text-muted hover:text-ink",
+            )}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
       {pendingCancellations.length > 0 ? (
@@ -97,76 +154,140 @@ export function ProxiesView({
               <th className="px-4 py-3 font-medium">Provider</th>
               <th className="px-4 py-3 font-medium">Availability</th>
               <th className="px-4 py-3 font-medium">Billing</th>
-              <th className="px-4 py-3 font-medium">Assigned to</th>
+              {tab === "vm" ? (
+                <>
+                  <th className="px-4 py-3 font-medium">Purchase source</th>
+                  <th className="px-4 py-3 font-medium">Assigned to</th>
+                </>
+              ) : (
+                <th className="px-4 py-3 font-medium">Connection Dolphin</th>
+              )}
               <th className="px-4 py-3 font-medium">Renewal</th>
               <th className="px-4 py-3 font-medium" />
             </tr>
           </thead>
           <tbody>
-            {shown.map((p) => {
-              const a = p.assignments[0];
-              return (
-                <tr key={p.id} className="border-b border-line last:border-0">
-                  <td className="px-4 py-3 font-mono text-xs">{p.ip}</td>
-                  <td className="px-4 py-3">{p.provider}</td>
-                  <td className="px-4 py-3.5">
-                    <StatusPill
-                      label={AVAILABILITY_LABELS[p.availability]}
-                      dotClass={AVAILABILITY_DOT[p.availability]}
-                      pillClass={AVAILABILITY_PILL[p.availability]}
-                    />
-                  </td>
-                  <td className="px-4 py-3">
-                    <Select
-                      className="h-8 w-48"
-                      value={p.billingStatus}
-                      onChange={(e) => {
-                        startTransition(async () => {
-                          await updateProxyBillingAction(
-                            p.id,
-                            e.target.value as never,
-                          );
-                          router.refresh();
-                        });
-                      }}
-                    >
-                      {Object.entries(BILLING_LABELS).map(([k, v]) => (
-                        <option key={k} value={k}>
-                          {v}
-                        </option>
-                      ))}
-                    </Select>
-                  </td>
-                  <td className="px-4 py-3">
-                    {a
-                      ? `${a.machine.vmid} · ${a.machine.company.name}`
-                      : "—"}
-                  </td>
-                  <td className="px-4 py-3.5">
-                    {formatCalendarDateLong(p.renewalDate)}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    {p.availability !== "RETIRED" &&
-                    p.availability !== "ASSIGNED" ? (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        disabled={pending}
-                        onClick={() => {
+            {shown.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={tab === "vm" ? 8 : 7}
+                  className="px-4 py-8 text-center text-sm text-muted"
+                >
+                  No {tab === "vm" ? "VM" : "Dolphin"} proxies yet.
+                </td>
+              </tr>
+            ) : (
+              shown.map((p) => {
+                const machineAssign = p.assignments[0];
+                const dolphinAssign = p.dolphinAssignments[0];
+                return (
+                  <tr key={p.id} className="border-b border-line last:border-0">
+                    <td className="px-4 py-3 font-mono text-xs">{p.ip}</td>
+                    <td className="px-4 py-3">{p.provider}</td>
+                    <td className="px-4 py-3.5">
+                      <StatusPill
+                        label={AVAILABILITY_LABELS[p.availability]}
+                        dotClass={AVAILABILITY_DOT[p.availability]}
+                        pillClass={AVAILABILITY_PILL[p.availability]}
+                      />
+                    </td>
+                    <td className="px-4 py-3">
+                      <Select
+                        className="h-8 w-48"
+                        value={p.billingStatus}
+                        onChange={(e) => {
                           startTransition(async () => {
-                            const res = await retireProxyAction(p.id);
-                            if (!res.ok) setError(res.error);
-                            else router.refresh();
+                            await updateProxyBillingAction(
+                              p.id,
+                              e.target.value as never,
+                            );
+                            router.refresh();
                           });
                         }}
                       >
-                        Retire
-                      </Button>
-                    ) : null}
-                  </td>
-                </tr>
-              );
-            })}
+                        {Object.entries(BILLING_LABELS).map(([k, v]) => (
+                          <option key={k} value={k}>
+                            {v}
+                          </option>
+                        ))}
+                      </Select>
+                    </td>
+                    {tab === "vm" ? (
+                      <>
+                        <td className="px-4 py-3">
+                          {p.purchaseSourceDolphin ? (
+                            <Link
+                              href="/dolphin"
+                              className="text-ink underline-offset-2 hover:underline"
+                            >
+                              {p.purchaseSourceDolphin.accountName}
+                            </Link>
+                          ) : (
+                            <span className="text-muted">—</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3">
+                          {machineAssign
+                            ? `${machineAssign.machine.vmid} · ${machineAssign.machine.company.name}`
+                            : "—"}
+                        </td>
+                      </>
+                    ) : (
+                      <td className="px-4 py-3">
+                        {dolphinAssign ? (
+                          <Link
+                            href="/dolphin"
+                            className="text-ink underline-offset-2 hover:underline"
+                          >
+                            {dolphinAssign.dolphin.accountName}
+                          </Link>
+                        ) : (
+                          <span className="text-muted">—</span>
+                        )}
+                      </td>
+                    )}
+                    <td className="px-4 py-3.5">
+                      {formatCalendarDateLong(p.renewalDate)}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="inline-flex gap-1">
+                        {tab === "dolphin" &&
+                        p.availability !== "RETIRED" ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={pending}
+                            onClick={() => {
+                              setError(null);
+                              setAssignRow(p);
+                            }}
+                          >
+                            {dolphinAssign ? "Rotate" : "Assign"}
+                          </Button>
+                        ) : null}
+                        {p.availability !== "RETIRED" &&
+                        p.availability !== "ASSIGNED" ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={pending}
+                            onClick={() => {
+                              startTransition(async () => {
+                                const res = await retireProxyAction(p.id);
+                                if (!res.ok) setError(res.error);
+                                else router.refresh();
+                              });
+                            }}
+                          >
+                            Retire
+                          </Button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
       </div>
@@ -180,7 +301,7 @@ export function ProxiesView({
       <Dialog
         open={addOpen}
         onClose={() => setAddOpen(false)}
-        title="Add proxy"
+        title={tab === "vm" ? "Add VM proxy" : "Add Dolphin proxy"}
         footer={
           <>
             <Button variant="ghost" onClick={() => setAddOpen(false)}>
@@ -200,6 +321,7 @@ export function ProxiesView({
         <form
           id="add-proxy-form"
           className="space-y-3"
+          key={`add-${tab}`}
           onSubmit={(e) => {
             e.preventDefault();
             const fd = new FormData(e.currentTarget);
@@ -207,6 +329,11 @@ export function ProxiesView({
               const res = await createProxyAction({
                 ip: String(fd.get("ip")),
                 provider: String(fd.get("provider")),
+                kind: tab === "vm" ? "VM" : "DOLPHIN",
+                purchaseSourceDolphinId:
+                  tab === "vm"
+                    ? String(fd.get("purchaseSourceDolphinId") || "") || null
+                    : null,
                 endpointHostname:
                   String(fd.get("endpointHostname") || "") || undefined,
                 endpointPort: fd.get("endpointPort")
@@ -236,6 +363,18 @@ export function ProxiesView({
               <Input name="provider" required />
             </Field>
           </div>
+          {tab === "vm" ? (
+            <Field label="Purchase-source Dolphin">
+              <Select name="purchaseSourceDolphinId" required defaultValue="">
+                <option value="" />
+                {dolphins.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.accountName}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          ) : null}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Endpoint host">
               <Input name="endpointHostname" />
@@ -262,6 +401,78 @@ export function ProxiesView({
           </div>
           <Field label="Notes">
             <Textarea name="notes" rows={2} />
+          </Field>
+        </form>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(assignRow)}
+        onClose={() => setAssignRow(null)}
+        title={
+          assignRow?.dolphinAssignments[0]
+            ? "Rotate connection proxy"
+            : "Assign connection proxy"
+        }
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setAssignRow(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              form="assign-dolphin-proxy-form"
+              type="submit"
+              disabled={pending}
+            >
+              Save
+            </Button>
+          </>
+        }
+      >
+        <form
+          id="assign-dolphin-proxy-form"
+          className="space-y-3"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!assignRow) return;
+            const fd = new FormData(e.currentTarget);
+            const dolphinId = String(fd.get("dolphinId") || "");
+            const reason = String(fd.get("reason") || "");
+            startTransition(async () => {
+              const res = await rotateDolphinConnectionProxyAction(dolphinId, {
+                proxyId: assignRow.id,
+                reason,
+              });
+              if (!res.ok) setError(res.error);
+              else {
+                setAssignRow(null);
+                router.refresh();
+              }
+            });
+          }}
+        >
+          <p className="text-sm text-muted">
+            Proxy <span className="font-mono text-ink">{assignRow?.ip}</span>
+          </p>
+          <Field label="Dolphin account">
+            <Select
+              name="dolphinId"
+              required
+              defaultValue={
+                assignRow?.dolphinAssignments[0]?.dolphinId || ""
+              }
+              key={assignRow?.id || "assign"}
+            >
+              <option value="" />
+              {dolphins.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.accountName}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Reason">
+            <Input name="reason" required />
           </Field>
         </form>
       </Dialog>

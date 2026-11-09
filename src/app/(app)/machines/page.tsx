@@ -36,7 +36,7 @@ export default async function MachinesPage({
       }),
       listServers(),
       listCompanies(),
-      listProxies({ availability: "AVAILABLE" }),
+      listProxies({ availability: "AVAILABLE", kind: "VM" }),
       getOrCreateSettings(),
       prisma.machine.groupBy({
         by: ["serverId"],

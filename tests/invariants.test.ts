@@ -37,6 +37,7 @@ async function reset() {
       "ClosureChecklist",
       "SetupChecklistItem",
       "SetupChecklist",
+      "DolphinProxyAssignment",
       "ProxyAssignment",
       "Proxy",
       "MachineMigration",
@@ -80,6 +81,12 @@ async function user() {
       passwordHash: await bcrypt.hash("test-password-xx", 4),
     },
   });
+}
+
+/** Purchase-source Dolphin for VM proxy creates (required). */
+async function purchaseDolphin(actorId: string, name = "BuySrc") {
+  const { createDolphinAccount } = await import("../src/lib/services/dolphin");
+  return createDolphinAccount({ accountName: name }, actorId);
 }
 
 describe("VM Control business invariants", () => {
@@ -195,12 +202,13 @@ describe("VM Control business invariants", () => {
       },
       actor.id,
     );
+    const src = await purchaseDolphin(actor.id);
     const p1 = await createProxy(
-      { ip: "192.0.2.1", provider: "A" },
+      { ip: "192.0.2.1", provider: "A", purchaseSourceDolphinId: src.id },
       actor.id,
     );
     const p2 = await createProxy(
-      { ip: "192.0.2.2", provider: "A" },
+      { ip: "192.0.2.2", provider: "A", purchaseSourceDolphinId: src.id },
       actor.id,
     );
     await rotateProxy(m.id, { proxyId: p1.id, reason: "initial" }, actor.id);
@@ -237,7 +245,11 @@ describe("VM Control business invariants", () => {
       },
       actor.id,
     );
-    const p = await createProxy({ ip: "192.0.2.3", provider: "A" }, actor.id);
+    const src = await purchaseDolphin(actor.id);
+    const p = await createProxy(
+      { ip: "192.0.2.3", provider: "A", purchaseSourceDolphinId: src.id },
+      actor.id,
+    );
     await rotateProxy(m1.id, { proxyId: p.id, reason: "a" }, actor.id);
     await expect(
       rotateProxy(m2.id, { proxyId: p.id, reason: "b" }, actor.id),
@@ -282,7 +294,11 @@ describe("VM Control business invariants", () => {
       },
       actor.id,
     );
-    const p = await createProxy({ ip: "192.0.2.4", provider: "A" }, actor.id);
+    const src = await purchaseDolphin(actor.id);
+    const p = await createProxy(
+      { ip: "192.0.2.4", provider: "A", purchaseSourceDolphinId: src.id },
+      actor.id,
+    );
     await rotateProxy(m.id, { proxyId: p.id, reason: "init" }, actor.id);
     await migrateMachine(
       m.id,
@@ -391,8 +407,15 @@ describe("VM Control business invariants", () => {
       },
       actor.id,
     );
-    const p1 = await createProxy({ ip: "192.0.2.5", provider: "A" }, actor.id);
-    const p2 = await createProxy({ ip: "192.0.2.6", provider: "A" }, actor.id);
+    const src = await purchaseDolphin(actor.id);
+    const p1 = await createProxy(
+      { ip: "192.0.2.5", provider: "A", purchaseSourceDolphinId: src.id },
+      actor.id,
+    );
+    const p2 = await createProxy(
+      { ip: "192.0.2.6", provider: "A", purchaseSourceDolphinId: src.id },
+      actor.id,
+    );
     await rotateProxy(m.id, { proxyId: p1.id, reason: "a" }, actor.id);
     await rotateProxy(m.id, { proxyId: p2.id, reason: "b" }, actor.id);
     await migrateMachine(m.id, { toServerId: s2.id, toVmid: 99 }, actor.id);
@@ -440,9 +463,19 @@ describe("VM Control business invariants", () => {
       },
       actor.id,
     );
-    const p1 = await createProxy({ ip: "192.0.2.7", provider: "A" }, actor.id);
-    const p2 = await createProxy({ ip: "192.0.2.8", provider: "A" }, actor.id);
-    const p3 = await createProxy({ ip: "192.0.2.9", provider: "A" }, actor.id);
+    const src = await purchaseDolphin(actor.id);
+    const p1 = await createProxy(
+      { ip: "192.0.2.7", provider: "A", purchaseSourceDolphinId: src.id },
+      actor.id,
+    );
+    const p2 = await createProxy(
+      { ip: "192.0.2.8", provider: "A", purchaseSourceDolphinId: src.id },
+      actor.id,
+    );
+    const p3 = await createProxy(
+      { ip: "192.0.2.9", provider: "A", purchaseSourceDolphinId: src.id },
+      actor.id,
+    );
     await rotateProxy(m.id, { proxyId: p1.id, reason: "init" }, actor.id);
 
     const results = await Promise.allSettled([
@@ -792,5 +825,149 @@ describe("VM Control business invariants", () => {
     expect(await listDolphinAccounts({ q: "alpha" })).toHaveLength(0);
     const stillThere = await prisma.machine.findUnique({ where: { id: m.id } });
     expect(stillThere).not.toBeNull();
+  });
+
+  it("16. VM proxy requires purchase-source Dolphin; Dolphin kind forbids it", async () => {
+    const { createProxy } = await import("../src/lib/services/proxies");
+    const actor = await user();
+    await expect(
+      createProxy({ ip: "192.0.2.50", provider: "A", kind: "VM" }, actor.id),
+    ).rejects.toMatchObject({ code: "PURCHASE_SOURCE_REQUIRED" });
+
+    const src = await purchaseDolphin(actor.id);
+    const vm = await createProxy(
+      {
+        ip: "192.0.2.51",
+        provider: "A",
+        kind: "VM",
+        purchaseSourceDolphinId: src.id,
+      },
+      actor.id,
+    );
+    expect(vm.kind).toBe("VM");
+    expect(vm.purchaseSourceDolphinId).toBe(src.id);
+
+    await expect(
+      createProxy(
+        {
+          ip: "192.0.2.52",
+          provider: "A",
+          kind: "DOLPHIN",
+          purchaseSourceDolphinId: src.id,
+        },
+        actor.id,
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_PURCHASE_SOURCE" });
+
+    const dp = await createProxy(
+      { ip: "192.0.2.53", provider: "A", kind: "DOLPHIN" },
+      actor.id,
+    );
+    expect(dp.kind).toBe("DOLPHIN");
+    expect(dp.purchaseSourceDolphinId).toBeNull();
+  });
+
+  it("17. Dolphin connection proxy 1:1 with history; reject wrong kind / in-use", async () => {
+    const {
+      createProxy,
+      rotateProxy,
+      rotateDolphinConnectionProxy,
+    } = await import("../src/lib/services/proxies");
+    const { createDolphinAccount, deleteDolphinAccount, retireDolphinAccount } =
+      await import("../src/lib/services/dolphin");
+    const { createMachine } = await import("../src/lib/services/machines");
+    const actor = await user();
+    const server = await prisma.server.create({ data: { name: "1tech2" } });
+    const company = await prisma.company.create({ data: { name: "Acme" } });
+    const m = await createMachine(
+      {
+        vmid: 80,
+        serverId: server.id,
+        companyId: company.id,
+        lifecycleStatus: LifecycleStatus.PREPARING,
+      },
+      actor.id,
+    );
+    const src = await purchaseDolphin(actor.id, "Src");
+    const d1 = await createDolphinAccount({ accountName: "d1" }, actor.id);
+    const d2 = await createDolphinAccount({ accountName: "d2" }, actor.id);
+
+    const vmProxy = await createProxy(
+      {
+        ip: "192.0.2.60",
+        provider: "A",
+        kind: "VM",
+        purchaseSourceDolphinId: src.id,
+      },
+      actor.id,
+    );
+    const dp1 = await createProxy(
+      { ip: "192.0.2.61", provider: "A", kind: "DOLPHIN" },
+      actor.id,
+    );
+    const dp2 = await createProxy(
+      { ip: "192.0.2.62", provider: "A", kind: "DOLPHIN" },
+      actor.id,
+    );
+
+    await expect(
+      rotateDolphinConnectionProxy(
+        d1.id,
+        { proxyId: vmProxy.id, reason: "wrong" },
+        actor.id,
+      ),
+    ).rejects.toMatchObject({ code: "WRONG_PROXY_KIND" });
+
+    await expect(
+      rotateProxy(m.id, { proxyId: dp1.id, reason: "wrong" }, actor.id),
+    ).rejects.toMatchObject({ code: "WRONG_PROXY_KIND" });
+
+    await rotateDolphinConnectionProxy(
+      d1.id,
+      { proxyId: dp1.id, reason: "initial" },
+      actor.id,
+    );
+    await rotateDolphinConnectionProxy(
+      d1.id,
+      { proxyId: dp2.id, reason: "rotate" },
+      actor.id,
+    );
+    const history = await prisma.dolphinProxyAssignment.findMany({
+      where: { dolphinId: d1.id },
+      include: { proxy: true },
+      orderBy: { startedAt: "asc" },
+    });
+    expect(history).toHaveLength(2);
+    expect(history[0].endedAt).not.toBeNull();
+    expect(history[0].proxy.ip).toBe("192.0.2.61");
+    expect(history[1].endedAt).toBeNull();
+    expect(history[1].proxy.ip).toBe("192.0.2.62");
+
+    await expect(
+      rotateDolphinConnectionProxy(
+        d2.id,
+        { proxyId: dp2.id, reason: "steal" },
+        actor.id,
+      ),
+    ).rejects.toMatchObject({ code: "PROXY_IN_USE" });
+
+    await expect(deleteDolphinAccount(src.id, actor.id)).rejects.toMatchObject({
+      code: "DOLPHIN_REFERENCED",
+    });
+    await expect(deleteDolphinAccount(d1.id, actor.id)).rejects.toMatchObject({
+      code: "DOLPHIN_REFERENCED",
+    });
+
+    await retireDolphinAccount(d1.id, actor.id);
+    const retired = await prisma.dolphinAccount.findUniqueOrThrow({
+      where: { id: d1.id },
+    });
+    expect(retired.retiredAt).not.toBeNull();
+    const openAfter = await prisma.dolphinProxyAssignment.findMany({
+      where: { dolphinId: d1.id, endedAt: null },
+    });
+    expect(openAfter).toHaveLength(0);
+    const freed = await prisma.proxy.findUniqueOrThrow({ where: { id: dp2.id } });
+    expect(freed.availability).toBe(ProxyAvailability.AVAILABLE);
   });
 });
