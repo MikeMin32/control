@@ -259,6 +259,129 @@ describe("VM Control business invariants", () => {
     expect((await getMachine(high.id)).internalIp).toBeNull();
   });
 
+  it("1e. Overview direct server/proxy/IP edits; reject conflicts; ordinary audit events", async () => {
+    const { createMachine, getMachine, updateMachine, migrateMachine } =
+      await import("../src/lib/services/machines");
+    const { createProxy, rotateProxy } = await import(
+      "../src/lib/services/proxies"
+    );
+    const actor = await user();
+    const s1 = await prisma.server.create({ data: { name: "1tech2" } });
+    const s2 = await prisma.server.create({ data: { name: "xeon" } });
+    const m = await createMachine(
+      {
+        vmid: 130,
+        serverId: s1.id,
+        lifecycleStatus: LifecycleStatus.ACTIVE,
+        internalIp: "192.168.130.10",
+      },
+      actor.id,
+    );
+    const src = await purchaseDolphin(actor.id);
+    const p1 = await createProxy(
+      { ip: "192.0.2.70", provider: "A", purchaseSourceDolphinId: src.id },
+      actor.id,
+    );
+    const p2 = await createProxy(
+      { ip: "192.0.2.71", provider: "A", purchaseSourceDolphinId: src.id },
+      actor.id,
+    );
+    const other = await createMachine(
+      {
+        vmid: 131,
+        serverId: s1.id,
+        lifecycleStatus: LifecycleStatus.ACTIVE,
+      },
+      actor.id,
+    );
+    await rotateProxy(other.id, { proxyId: p2.id, reason: "init" }, actor.id);
+
+    // Assign missing proxy via Save-style update
+    await updateMachine(m.id, { proxyId: p1.id }, actor.id);
+    let full = await getMachine(m.id);
+    expect(full.proxyAssignments.filter((a) => !a.endedAt)).toHaveLength(1);
+    expect(full.proxyAssignments[0]?.proxyId).toBe(p1.id);
+    expect(full.proxyAssignments[0]?.reason).toBe("Manual edit");
+    expect(
+      full.activities.some((a) => a.message === "Proxy assigned"),
+    ).toBe(true);
+    const p1After = await prisma.proxy.findUniqueOrThrow({ where: { id: p1.id } });
+    expect(p1After.availability).toBe(ProxyAvailability.ASSIGNED);
+    expect(p1After.billingStatus).toBe(BillingStatus.ACTIVE);
+    expect(p1After.purchaseSourceDolphinId).toBe(src.id);
+
+    // Correct server without migration record / VMID change
+    const migrationsBefore = await prisma.machineMigration.count({
+      where: { machineId: m.id },
+    });
+    await updateMachine(m.id, { serverId: s2.id }, actor.id);
+    full = await getMachine(m.id);
+    expect(full.serverId).toBe(s2.id);
+    expect(full.vmid).toBe(130);
+    expect(full.internalIp).toBe("192.168.130.10");
+    expect(full.lifecycleStatus).toBe(LifecycleStatus.ACTIVE);
+    expect(
+      await prisma.machineMigration.count({ where: { machineId: m.id } }),
+    ).toBe(migrationsBefore);
+    expect(
+      full.activities.some((a) => a.message === "Server updated"),
+    ).toBe(true);
+
+    // Reject proxy already assigned to another VM
+    await expect(
+      updateMachine(m.id, { proxyId: p2.id }, actor.id),
+    ).rejects.toMatchObject({ code: "PROXY_IN_USE" });
+
+    const p3 = await createProxy(
+      { ip: "192.0.2.72", provider: "A", purchaseSourceDolphinId: src.id },
+      actor.id,
+    );
+    await updateMachine(m.id, { proxyId: p3.id }, actor.id);
+    full = await getMachine(m.id);
+    const open = full.proxyAssignments.filter((a) => !a.endedAt);
+    expect(open).toHaveLength(1);
+    expect(open[0]?.proxyId).toBe(p3.id);
+    expect(open[0]?.reason).toBe("Manual edit");
+    const ended = full.proxyAssignments.find((a) => a.proxyId === p1.id);
+    expect(ended?.endedAt).not.toBeNull();
+    expect(ended?.reason).toBe("Manual edit");
+    expect(
+      full.activities.some((a) => a.message === "Proxy updated"),
+    ).toBe(true);
+    expect(
+      full.activities.some((a) => /Rotated|Migrated/i.test(a.message)),
+    ).toBe(false);
+    const p1Freed = await prisma.proxy.findUniqueOrThrow({ where: { id: p1.id } });
+    expect(p1Freed.availability).toBe(ProxyAvailability.AVAILABLE);
+    expect(p1Freed.billingStatus).toBe(BillingStatus.ACTIVE);
+
+    // Clear proxy
+    await updateMachine(m.id, { proxyId: null }, actor.id);
+    full = await getMachine(m.id);
+    expect(full.proxyAssignments.filter((a) => !a.endedAt)).toHaveLength(0);
+    expect(
+      full.activities.some((a) => a.message === "Proxy unassigned"),
+    ).toBe(true);
+
+    // Internal IP edit event
+    await updateMachine(m.id, { internalIp: "10.9.8.7" }, actor.id);
+    full = await getMachine(m.id);
+    expect(full.internalIp).toBe("10.9.8.7");
+    expect(
+      full.activities.some((a) => a.message === "Internal IP updated"),
+    ).toBe(true);
+
+    // Explicit migrate still creates migration history (separate path)
+    await migrateMachine(
+      m.id,
+      { toServerId: s1.id, toVmid: 130 },
+      actor.id,
+    );
+    expect(
+      await prisma.machineMigration.count({ where: { machineId: m.id } }),
+    ).toBe(migrationsBefore + 1);
+  });
+
   it("1b. search includes internal IP; country optional and unset by default", async () => {
     const { createMachine, listMachines, updateMachine } = await import(
       "../src/lib/services/machines"
