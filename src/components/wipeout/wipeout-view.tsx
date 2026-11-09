@@ -27,6 +27,7 @@ import {
   updateChecklistItemAction,
 } from "@/lib/actions";
 import { CLOSURE_REASON_LABELS } from "@/lib/labels";
+import { useChecklistOptimistic } from "@/lib/checklist-optimistic";
 import { cn, formatDate } from "@/lib/utils";
 import { ProgressBar } from "@/components/ui/progress-bar";
 import type { MissingWipeoutTask } from "@/lib/services/wipeout";
@@ -37,7 +38,10 @@ type Row = Machine & {
   closure: (ClosureChecklist & { items: ClosureChecklistItem[] }) | null;
 };
 
-function isResolved(item: ClosureChecklistItem) {
+function isResolved(item: {
+  status: ClosureChecklistItem["status"];
+  naReason: string | null;
+}) {
   if (item.status === "COMPLETED") return true;
   if (item.status === "NOT_APPLICABLE" && Boolean(item.naReason?.trim())) {
     return true;
@@ -45,15 +49,29 @@ function isResolved(item: ClosureChecklistItem) {
   return false;
 }
 
-function countResolved(items: ClosureChecklistItem[]) {
+function countResolved(
+  items: { status: ClosureChecklistItem["status"]; naReason: string | null }[],
+) {
   return items.filter(isResolved).length;
 }
 
-function requiredRemaining(items: ClosureChecklistItem[]) {
+function requiredRemaining(
+  items: {
+    required: boolean;
+    status: ClosureChecklistItem["status"];
+    naReason: string | null;
+  }[],
+) {
   return items.filter((i) => i.required && !isResolved(i)).length;
 }
 
-function canComplete(items: ClosureChecklistItem[]) {
+function canComplete(
+  items: {
+    required: boolean;
+    status: ClosureChecklistItem["status"];
+    naReason: string | null;
+  }[],
+) {
   return requiredRemaining(items) === 0;
 }
 
@@ -70,9 +88,6 @@ export function WipeoutView({
   const searchParams = useSearchParams();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [optimistic, setOptimistic] = useState<
-    Record<string, ClosureChecklistItem["status"]>
-  >({});
   const [menuItemId, setMenuItemId] = useState<string | null>(null);
   const [noteItem, setNoteItem] = useState<ClosureChecklistItem | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
@@ -88,17 +103,18 @@ export function WipeoutView({
   const menuRef = useRef<HTMLDivElement | null>(null);
 
   const closure = selected?.closure ?? null;
-  const items = useMemo(() => {
-    if (!closure) return [];
-    return closure.items
-      .slice()
-      .sort((a, b) => a.sortOrder - b.sortOrder)
-      .map((item) =>
-        optimistic[item.id]
-          ? { ...item, status: optimistic[item.id]! }
-          : item,
-      );
-  }, [closure, optimistic]);
+  const sortedServerItems = useMemo(() => {
+    if (!closure) return [] as ClosureChecklistItem[];
+    return closure.items.slice().sort((a, b) => a.sortOrder - b.sortOrder);
+  }, [closure]);
+
+  const {
+    items,
+    begin,
+    revert,
+    clearAll,
+    hasPatch,
+  } = useChecklistOptimistic(sortedServerItems);
 
   const resolved = countResolved(items);
   const unresolvedRequired = items.filter((i) => i.required && !isResolved(i));
@@ -136,8 +152,8 @@ export function WipeoutView({
   }
 
   useEffect(() => {
-    setOptimistic({});
-  }, [closure?.id]);
+    clearAll();
+  }, [closure?.id, clearAll]);
 
   useEffect(() => {
     if (!menuItemId) return;
@@ -165,8 +181,15 @@ export function WipeoutView({
     status: ClosureChecklistItem["status"],
     extra?: { notes?: string; naReason?: string },
   ) {
-    const previous = item.status;
-    setOptimistic((s) => ({ ...s, [item.id]: status }));
+    const seq = begin(item.id, {
+      status,
+      naReason:
+        status === "NOT_APPLICABLE"
+          ? extra?.naReason ?? null
+          : status === "PENDING" || status === "COMPLETED"
+            ? null
+            : undefined,
+    });
     setError(null);
     startTransition(async () => {
       const res = await updateChecklistItemAction(item.id, {
@@ -174,21 +197,17 @@ export function WipeoutView({
         ...extra,
       });
       if (!res.ok) {
-        setOptimistic((s) => ({ ...s, [item.id]: previous }));
+        revert(item.id, seq);
         setError(res.error);
         return;
       }
-      setOptimistic((s) => {
-        const next = { ...s };
-        delete next[item.id];
-        return next;
-      });
+      // Keep optimistic patch until props confirm — clearing here caused flicker
       router.refresh();
     });
   }
 
   function toggleComplete(item: ClosureChecklistItem) {
-    if (readOnly || pending) return;
+    if (readOnly) return;
     if (item.status === "NOT_APPLICABLE") return;
     if (item.status === "COMPLETED") {
       applyStatus(item, "PENDING");
@@ -361,7 +380,7 @@ export function WipeoutView({
               {items.map((item) => {
                 const completed = item.status === "COMPLETED";
                 const na = item.status === "NOT_APPLICABLE";
-                const saving = pending && optimistic[item.id];
+                const saving = hasPatch(item.id);
                 return (
                   <li
                     key={item.id}

@@ -18,11 +18,15 @@ import {
   updateSetupItemAction,
 } from "@/lib/actions";
 import { SETUP_SECTIONS } from "@/lib/checklist-defaults";
+import { useChecklistOptimistic } from "@/lib/checklist-optimistic";
 import { cn } from "@/lib/utils";
 
 type Checklist = SetupChecklist & { items: SetupChecklistItem[] };
 
-function isResolved(item: SetupChecklistItem) {
+function isResolved(item: {
+  status: SetupChecklistItem["status"];
+  naReason: string | null;
+}) {
   if (item.status === "COMPLETED") return true;
   if (item.status === "NOT_APPLICABLE" && Boolean(item.naReason?.trim())) {
     return true;
@@ -45,9 +49,6 @@ export function SetupChecklistPanel({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [optimistic, setOptimistic] = useState<
-    Record<string, SetupChecklistItem["status"]>
-  >({});
   const [menuItemId, setMenuItemId] = useState<string | null>(null);
   const [noteItem, setNoteItem] = useState<SetupChecklistItem | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
@@ -57,16 +58,14 @@ export function SetupChecklistPanel({
   const [overrideNote, setOverrideNote] = useState("");
   const menuRef = useRef<HTMLDivElement | null>(null);
 
-  const items = useMemo(() => {
-    return checklist.items
-      .slice()
-      .sort((a, b) => a.sortOrder - b.sortOrder)
-      .map((item) =>
-        optimistic[item.id]
-          ? { ...item, status: optimistic[item.id]! }
-          : item,
-      );
-  }, [checklist.items, optimistic]);
+  const sortedServerItems = useMemo(
+    () =>
+      checklist.items.slice().sort((a, b) => a.sortOrder - b.sortOrder),
+    [checklist.items],
+  );
+
+  const { items, begin, revert, clearAll, hasPatch } =
+    useChecklistOptimistic(sortedServerItems);
 
   const resolved = items.filter(isResolved).length;
   const unresolvedRequired = items.filter((i) => i.required && !isResolved(i));
@@ -114,8 +113,8 @@ export function SetupChecklistPanel({
   });
 
   useEffect(() => {
-    setOptimistic({});
-  }, [checklist.id, checklist.completedAt]);
+    clearAll();
+  }, [checklist.id, checklist.completedAt, clearAll]);
 
   useEffect(() => {
     if (!menuItemId) return;
@@ -133,21 +132,24 @@ export function SetupChecklistPanel({
     status: SetupChecklistItem["status"],
     extra?: { notes?: string; naReason?: string },
   ) {
-    const previous = item.status;
-    setOptimistic((s) => ({ ...s, [item.id]: status }));
+    const seq = begin(item.id, {
+      status,
+      naReason:
+        status === "NOT_APPLICABLE"
+          ? extra?.naReason ?? null
+          : status === "PENDING" || status === "COMPLETED"
+            ? null
+            : undefined,
+    });
     setError(null);
     startTransition(async () => {
       const res = await updateSetupItemAction(item.id, { status, ...extra });
       if (!res.ok) {
-        setOptimistic((s) => ({ ...s, [item.id]: previous }));
+        revert(item.id, seq);
         setError(res.error);
         return;
       }
-      setOptimistic((s) => {
-        const next = { ...s };
-        delete next[item.id];
-        return next;
-      });
+      // Keep optimistic patch until props confirm — clearing here caused flicker
       router.refresh();
     });
   }
@@ -235,6 +237,7 @@ export function SetupChecklistPanel({
                   {sectionItems.map((item) => {
                     const completed = item.status === "COMPLETED";
                     const na = item.status === "NOT_APPLICABLE";
+                    const saving = hasPatch(item.id);
                     return (
                       <li
                         key={item.id}
@@ -242,6 +245,7 @@ export function SetupChecklistPanel({
                           "rounded-slate border border-line bg-surface p-3 transition-colors",
                           completed && "border-[#cfead6] bg-[#f4faf6]",
                           na && "bg-sidebar/60",
+                          saving && "opacity-70",
                         )}
                       >
                         <div className="flex items-start gap-3">
