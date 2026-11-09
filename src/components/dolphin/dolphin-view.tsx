@@ -10,7 +10,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Copy, Pencil, Plus, Search, Trash2 } from "lucide-react";
 import type {
-  Company,
   DolphinAccount,
   DolphinProxyAssignment,
   Machine,
@@ -35,7 +34,7 @@ import {
 } from "@/lib/labels";
 import { linkedVmOptionLabel } from "@/lib/services/dolphin";
 
-type MachineOption = Machine & { server: Server; company: Company };
+type MachineOption = Machine & { server: Server };
 
 type AccountRow = DolphinAccount & {
   machine: MachineOption | null;
@@ -46,11 +45,13 @@ type AccountRow = DolphinAccount & {
 /** `101 · Alpha Labs · [flag]` — VMID + company + flag only. */
 function machineLine(m: MachineOption | null | undefined) {
   if (!m) return null;
-  const company = m.company?.name?.trim() || "No company";
+  const company = m.company?.trim() || "";
   const parts: ReactNode[] = [];
   parts.push(<span key="vmid">{m.vmid}</span>);
-  parts.push(<span key="sep1"> · </span>);
-  parts.push(<span key="company">{company}</span>);
+  if (company) {
+    parts.push(<span key="sep1"> · </span>);
+    parts.push(<span key="company">{company}</span>);
+  }
   if (m.country) {
     parts.push(<span key="sep2"> · </span>);
     parts.push(

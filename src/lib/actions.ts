@@ -90,12 +90,13 @@ export async function createMachineAction(input: {
   vmid: number;
   displayName?: string;
   serverId: string;
-  companyId: string;
+  company?: string | null;
   lifecycleStatus?: LifecycleStatus;
   internalIp?: string;
   country?: string | null;
   os?: string;
   notes?: string;
+  proxyId?: string | null;
 }) {
   try {
     await assertSameOrigin();

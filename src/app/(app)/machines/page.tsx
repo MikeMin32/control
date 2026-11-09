@@ -1,11 +1,7 @@
 import { Suspense } from "react";
 import { MachinesView } from "@/components/machines/machines-view";
 import { listMachines, getMachine } from "@/lib/services/machines";
-import {
-  listServers,
-  listCompanies,
-  getOrCreateSettings,
-} from "@/lib/services/settings";
+import { listServers, getOrCreateSettings } from "@/lib/services/settings";
 import { listProxies } from "@/lib/services/proxies";
 import { prisma } from "@/lib/db";
 import { getProxmoxStatusSync } from "@/lib/proxmox";
@@ -25,7 +21,7 @@ export default async function MachinesPage({
   const id = sp.id;
   const tab = sp.tab || "";
 
-  const [list, servers, companies, availableProxies, settings, grouped] =
+  const [list, servers, availableProxies, settings, grouped] =
     await Promise.all([
       listMachines({
         serverId,
@@ -35,7 +31,6 @@ export default async function MachinesPage({
         pageSize: 25,
       }),
       listServers(),
-      listCompanies(),
       listProxies({ availability: "AVAILABLE", kind: "VM" }),
       getOrCreateSettings(),
       prisma.machine.groupBy({
@@ -69,7 +64,6 @@ export default async function MachinesPage({
         page={list.page}
         pageSize={list.pageSize}
         servers={servers}
-        companies={companies}
         availableProxies={availableProxies.map(serializeProxy)}
         timezone={settings.displayTimezone}
         selected={selected}

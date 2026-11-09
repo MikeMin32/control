@@ -113,7 +113,7 @@ describe("VM Control business invariants", () => {
       {
         vmid: 101,
         serverId: server.id,
-        companyId: company.id,
+        company: company.name,
         displayName: "web",
         internalIp: "192.168.201.10",
         country: "DE",
@@ -134,6 +134,77 @@ describe("VM Control business invariants", () => {
     expect(
       reloaded.setupChecklist?.items.some((i) => i.label === "Create the VM"),
     ).toBe(true);
+    expect(reloaded.company).toBe("Acme");
+  });
+
+  it("1c. empty company/proxy allowed; company text + proxy assignment persist", async () => {
+    const { createMachine, getMachine } = await import(
+      "../src/lib/services/machines"
+    );
+    const { createProxy, listProxies } = await import(
+      "../src/lib/services/proxies"
+    );
+    const actor = await user();
+    const server = await prisma.server.create({ data: { name: "1tech2" } });
+
+    const empty = await createMachine(
+      {
+        vmid: 301,
+        serverId: server.id,
+        lifecycleStatus: LifecycleStatus.ACTIVE,
+      },
+      actor.id,
+    );
+    const emptyReloaded = await getMachine(empty.id);
+    expect(emptyReloaded.company).toBeNull();
+    expect(emptyReloaded.proxyAssignments.filter((a) => !a.endedAt)).toHaveLength(
+      0,
+    );
+
+    const labeled = await createMachine(
+      {
+        vmid: 302,
+        serverId: server.id,
+        company: "Plain Label Co",
+        lifecycleStatus: LifecycleStatus.ACTIVE,
+      },
+      actor.id,
+    );
+    expect((await getMachine(labeled.id)).company).toBe("Plain Label Co");
+
+    const src = await purchaseDolphin(actor.id);
+    const proxy = await createProxy(
+      {
+        ip: "192.0.2.40",
+        provider: "A",
+        purchaseSourceDolphinId: src.id,
+      },
+      actor.id,
+    );
+    expect(proxy.purchaseSourceDolphinId).toBe(src.id);
+
+    const withProxy = await createMachine(
+      {
+        vmid: 303,
+        serverId: server.id,
+        company: "With Proxy",
+        lifecycleStatus: LifecycleStatus.ACTIVE,
+        proxyId: proxy.id,
+      },
+      actor.id,
+    );
+    const assigned = await getMachine(withProxy.id);
+    const open = assigned.proxyAssignments.filter((a) => !a.endedAt);
+    expect(open).toHaveLength(1);
+    expect(open[0]?.proxyId).toBe(proxy.id);
+    expect(open[0]?.proxy.ip).toBe("192.0.2.40");
+    expect(open[0]?.proxy.purchaseSourceDolphinId).toBe(src.id);
+
+    const proxies = await listProxies({ availability: "ASSIGNED", kind: "VM" });
+    const row = proxies.find((p) => p.id === proxy.id);
+    expect(row?.availability).toBe(ProxyAvailability.ASSIGNED);
+    expect(row?.assignments[0]?.machineId).toBe(withProxy.id);
+    expect(row?.purchaseSourceDolphinId).toBe(src.id);
   });
 
   it("1b. search includes internal IP; country optional and unset by default", async () => {
@@ -144,7 +215,7 @@ describe("VM Control business invariants", () => {
     const server = await prisma.server.create({ data: { name: "1tech2" } });
     const company = await prisma.company.create({ data: { name: "Acme" } });
     const m = await createMachine(
-      { vmid: 202, serverId: server.id, companyId: company.id,
+      { vmid: 202, serverId: server.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
@@ -172,13 +243,13 @@ describe("VM Control business invariants", () => {
     const s2 = await prisma.server.create({ data: { name: "xeon" } });
     const company = await prisma.company.create({ data: { name: "Acme" } });
     await createMachine(
-      { vmid: 1, serverId: s1.id, companyId: company.id,
+      { vmid: 1, serverId: s1.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
     );
     await createMachine(
-      { vmid: 2, serverId: s2.id, companyId: company.id,
+      { vmid: 2, serverId: s2.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
@@ -197,7 +268,7 @@ describe("VM Control business invariants", () => {
     const server = await prisma.server.create({ data: { name: "1tech2" } });
     const company = await prisma.company.create({ data: { name: "Acme" } });
     const m = await createMachine(
-      { vmid: 10, serverId: server.id, companyId: company.id,
+      { vmid: 10, serverId: server.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
@@ -234,13 +305,13 @@ describe("VM Control business invariants", () => {
     const server = await prisma.server.create({ data: { name: "1tech2" } });
     const company = await prisma.company.create({ data: { name: "Acme" } });
     const m1 = await createMachine(
-      { vmid: 1, serverId: server.id, companyId: company.id,
+      { vmid: 1, serverId: server.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
     );
     const m2 = await createMachine(
-      { vmid: 2, serverId: server.id, companyId: company.id,
+      { vmid: 2, serverId: server.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
@@ -262,14 +333,14 @@ describe("VM Control business invariants", () => {
     const server = await prisma.server.create({ data: { name: "1tech2" } });
     const company = await prisma.company.create({ data: { name: "Acme" } });
     await createMachine(
-      { vmid: 50, serverId: server.id, companyId: company.id,
+      { vmid: 50, serverId: server.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
     );
     await expect(
       createMachine(
-      { vmid: 50, serverId: server.id, companyId: company.id,
+      { vmid: 50, serverId: server.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
         actor.id,
@@ -289,7 +360,7 @@ describe("VM Control business invariants", () => {
     const s2 = await prisma.server.create({ data: { name: "xeon" } });
     const company = await prisma.company.create({ data: { name: "Acme" } });
     const m = await createMachine(
-      { vmid: 77, serverId: s1.id, companyId: company.id,
+      { vmid: 77, serverId: s1.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
@@ -322,7 +393,7 @@ describe("VM Control business invariants", () => {
     const server = await prisma.server.create({ data: { name: "1tech2" } });
     const company = await prisma.company.create({ data: { name: "Acme" } });
     const m = await createMachine(
-      { vmid: 9, serverId: server.id, companyId: company.id,
+      { vmid: 9, serverId: server.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
@@ -344,7 +415,7 @@ describe("VM Control business invariants", () => {
     const server = await prisma.server.create({ data: { name: "1tech2" } });
     const company = await prisma.company.create({ data: { name: "Acme" } });
     const m = await createMachine(
-      { vmid: 11, serverId: server.id, companyId: company.id,
+      { vmid: 11, serverId: server.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
@@ -366,7 +437,7 @@ describe("VM Control business invariants", () => {
     const server = await prisma.server.create({ data: { name: "1tech2" } });
     const company = await prisma.company.create({ data: { name: "Acme" } });
     const m = await createMachine(
-      { vmid: 12, serverId: server.id, companyId: company.id,
+      { vmid: 12, serverId: server.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
@@ -402,7 +473,7 @@ describe("VM Control business invariants", () => {
     const s2 = await prisma.server.create({ data: { name: "xeon" } });
     const company = await prisma.company.create({ data: { name: "Acme" } });
     const m = await createMachine(
-      { vmid: 13, serverId: s1.id, companyId: company.id, displayName: "hist",
+      { vmid: 13, serverId: s1.id, company: company.name, displayName: "hist",
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
@@ -458,7 +529,7 @@ describe("VM Control business invariants", () => {
     const server = await prisma.server.create({ data: { name: "1tech2" } });
     const company = await prisma.company.create({ data: { name: "Acme" } });
     const m = await createMachine(
-      { vmid: 14, serverId: server.id, companyId: company.id,
+      { vmid: 14, serverId: server.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
@@ -508,7 +579,7 @@ describe("VM Control business invariants", () => {
     const server = await prisma.server.create({ data: { name: "1tech2" } });
     const company = await prisma.company.create({ data: { name: "Acme" } });
     const m = await createMachine(
-      { vmid: 501, serverId: server.id, companyId: company.id,
+      { vmid: 501, serverId: server.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
@@ -544,7 +615,7 @@ describe("VM Control business invariants", () => {
     const server = await prisma.server.create({ data: { name: "1tech2" } });
     const company = await prisma.company.create({ data: { name: "Acme" } });
     const m = await createMachine(
-      { vmid: 502, serverId: server.id, companyId: company.id,
+      { vmid: 502, serverId: server.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
@@ -605,7 +676,7 @@ describe("VM Control business invariants", () => {
     const server = await prisma.server.create({ data: { name: "1tech2" } });
     const company = await prisma.company.create({ data: { name: "Acme" } });
     const m = await createMachine(
-      { vmid: 15, serverId: server.id, companyId: company.id,
+      { vmid: 15, serverId: server.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
@@ -640,7 +711,7 @@ describe("VM Control business invariants", () => {
 
     await expect(
       createMachine(
-        { vmid: 600, serverId: server.id, companyId: company.id },
+        { vmid: 600, serverId: server.id, company: company.name },
         actor.id,
       ),
     ).rejects.toMatchObject({ code: "INVALID_STATUS" });
@@ -649,7 +720,7 @@ describe("VM Control business invariants", () => {
       {
         vmid: 601,
         serverId: server.id,
-        companyId: company.id,
+        company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
@@ -661,7 +732,7 @@ describe("VM Control business invariants", () => {
       {
         vmid: 602,
         serverId: server.id,
-        companyId: company.id,
+        company: company.name,
         lifecycleStatus: LifecycleStatus.ACTIVE,
       },
       actor.id,
@@ -674,7 +745,7 @@ describe("VM Control business invariants", () => {
       {
         vmid: 603,
         serverId: server.id,
-        companyId: company.id,
+        company: company.name,
         lifecycleStatus: LifecycleStatus.BURNED,
       },
       actor.id,
@@ -688,7 +759,7 @@ describe("VM Control business invariants", () => {
         {
           vmid: 604,
           serverId: server.id,
-          companyId: company.id,
+          company: company.name,
           lifecycleStatus: LifecycleStatus.EXPIRED,
         },
         actor.id,
@@ -705,7 +776,7 @@ describe("VM Control business invariants", () => {
     const server = await prisma.server.create({ data: { name: "1tech2" } });
     const company = await prisma.company.create({ data: { name: "Acme" } });
     const m = await createMachine(
-      { vmid: 611, serverId: server.id, companyId: company.id,
+      { vmid: 611, serverId: server.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
@@ -742,7 +813,7 @@ describe("VM Control business invariants", () => {
     const server = await prisma.server.create({ data: { name: "1tech2" } });
     const company = await prisma.company.create({ data: { name: "Acme" } });
     const m = await createMachine(
-      { vmid: 612, serverId: server.id, companyId: company.id,
+      { vmid: 612, serverId: server.id, company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,
@@ -777,7 +848,7 @@ describe("VM Control business invariants", () => {
       {
         vmid: 701,
         serverId: server.id,
-        companyId: company.id,
+        company: company.name,
         displayName: "dolphin-host",
         lifecycleStatus: LifecycleStatus.ACTIVE,
       },
@@ -883,7 +954,7 @@ describe("VM Control business invariants", () => {
       {
         vmid: 80,
         serverId: server.id,
-        companyId: company.id,
+        company: company.name,
         lifecycleStatus: LifecycleStatus.PREPARING,
       },
       actor.id,

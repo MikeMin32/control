@@ -4,7 +4,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type {
   ClosureChecklist,
   ClosureChecklistItem,
-  Company,
   Machine,
   MachineMigration,
   Proxy,
@@ -19,7 +18,6 @@ import { formatCalendarDate, formatDate } from "@/lib/utils";
 
 type Row = Machine & {
   server: Server;
-  company: Company;
   closure:
     | (ClosureChecklist & {
         items: ClosureChecklistItem[];
@@ -103,7 +101,7 @@ export function ArchiveView({
                   <td className="px-4 py-3 font-medium tabular-nums">
                     {r.vmid}
                   </td>
-                  <td className="px-4 py-3">{r.company.name}</td>
+                  <td className="px-4 py-3">{r.company?.trim() || ""}</td>
                   <td className="px-4 py-3">{r.server.name}</td>
                   <td className="px-4 py-3">
                     {r.closure
@@ -130,7 +128,7 @@ export function ArchiveView({
           <div className="space-y-5 text-sm">
             <section className="space-y-1">
               <h3 className="font-medium">Overview</h3>
-              <p>Company: {selected.company.name}</p>
+              <p>Company: {selected.company?.trim() || ""}</p>
               <p>Final server: {selected.server.name}</p>
               <p>
                 Closure:{" "}

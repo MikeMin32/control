@@ -12,7 +12,6 @@ import {
   Server as ServerIcon,
 } from "lucide-react";
 import type {
-  Company,
   LifecycleStatus,
   Machine,
   Proxy,
@@ -27,7 +26,6 @@ import { Dialog } from "@/components/ui/dialog";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import { StatusPill } from "@/components/ui/status-pill";
 import {
-  createCompanyInlineAction,
   createMachineAction,
   markBurnedAction,
   migrateMachineAction,
@@ -57,7 +55,6 @@ type SetupBundle = SetupChecklist & { items: SetupChecklistItem[] };
 
 type MachineRow = Machine & {
   server: Server;
-  company: Company;
   proxyAssignments: (ProxyAssignment & { proxy: Proxy })[];
   closure?: {
     id: string;
@@ -99,7 +96,6 @@ export function MachinesView({
   page,
   pageSize,
   servers,
-  companies,
   availableProxies,
   timezone,
   selected,
@@ -116,7 +112,6 @@ export function MachinesView({
   page: number;
   pageSize: number;
   servers: Server[];
-  companies: Company[];
   availableProxies: Proxy[];
   timezone: string;
   selected: DetailMachine | null;
@@ -493,7 +488,9 @@ export function MachinesView({
                         </div>
                       </div>
                     </td>
-                    <td className="px-4 py-3.5 text-ink">{m.company.name}</td>
+                    <td className="px-4 py-3.5 text-ink">
+                      {m.company?.trim() || ""}
+                    </td>
                     <td className="px-4 py-3.5">
                       <CountryFlag code={m.country} />
                     </td>
@@ -543,9 +540,7 @@ export function MachinesView({
                           {current.ip}
                           <Copy className="h-3 w-3 text-muted" />
                         </button>
-                      ) : (
-                        <span className="text-muted">—</span>
-                      )}
+                      ) : null}
                     </td>
                     <td className="px-4 py-3.5 whitespace-nowrap">
                       {current?.renewalDate ? (
@@ -701,20 +696,6 @@ export function MachinesView({
             setError(null);
             const fd = new FormData(e.currentTarget);
             startTransition(async () => {
-              let companyId = String(fd.get("companyId") || "");
-              const newCompany = String(fd.get("newCompany") || "").trim();
-              if (newCompany) {
-                const created = await createCompanyInlineAction(newCompany);
-                if (!created.ok) {
-                  setError(created.error);
-                  return;
-                }
-                companyId = created.id!;
-              }
-              if (!companyId) {
-                setError("Company is required");
-                return;
-              }
               const status = String(fd.get("lifecycleStatus") || "");
               if (!status) {
                 setError("Status is required");
@@ -724,12 +705,12 @@ export function MachinesView({
                 vmid: Number(fd.get("vmid")),
                 displayName: String(fd.get("displayName") || "") || undefined,
                 serverId: String(fd.get("serverId")),
-                companyId,
+                company: String(fd.get("company") || "") || null,
                 lifecycleStatus: status as LifecycleStatus,
                 internalIp: String(fd.get("internalIp") || "") || undefined,
                 country: String(fd.get("country") || "") || null,
-                os: String(fd.get("os") || "") || undefined,
                 notes: String(fd.get("notes") || "") || undefined,
+                proxyId: String(fd.get("proxyId") || "") || null,
               });
               if (!res.ok) {
                 setError(res.error);
@@ -766,17 +747,7 @@ export function MachinesView({
             </Select>
           </Field>
           <Field label="Company">
-            <Select name="companyId" defaultValue="">
-              <option value="" />
-              {companies.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Or create company">
-            <Input name="newCompany" />
+            <Input name="company" />
           </Field>
           <Field label="Status">
             <Select name="lifecycleStatus" required defaultValue="">
@@ -798,8 +769,15 @@ export function MachinesView({
             <Field label="Internal IP">
               <Input name="internalIp" />
             </Field>
-            <Field label="OS">
-              <Input name="os" />
+            <Field label="Proxy">
+              <Select name="proxyId" defaultValue="">
+                <option value="" />
+                {availableProxies.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.ip} · {p.provider}
+                  </option>
+                ))}
+              </Select>
             </Field>
           </div>
           <Field label="Notes">
@@ -950,7 +928,6 @@ export function MachinesView({
             {tab === "overview" ? (
               <Overview
                 machine={selected}
-                companies={companies}
                 timezone={timezone}
                 pending={pending}
                 onSave={(input) => {
@@ -1181,7 +1158,6 @@ function Pagination({
 
 function Overview({
   machine,
-  companies,
   timezone,
   pending,
   onSave,
@@ -1194,12 +1170,11 @@ function Overview({
   error,
 }: {
   machine: DetailMachine;
-  companies: Company[];
   timezone: string;
   pending: boolean;
   onSave: (input: {
     displayName?: string | null;
-    companyId?: string;
+    company?: string | null;
     lifecycleStatus?: LifecycleStatus;
     internalIp?: string | null;
     country?: string | null;
@@ -1227,7 +1202,7 @@ function Overview({
         const fd = new FormData(e.currentTarget);
         onSave({
           displayName: String(fd.get("displayName") || "") || null,
-          companyId: String(fd.get("companyId")),
+          company: String(fd.get("company") || "") || null,
           lifecycleStatus: String(fd.get("lifecycleStatus")) as LifecycleStatus,
           internalIp: String(fd.get("internalIp") || "") || null,
           country: String(fd.get("country") || "") || null,
@@ -1247,7 +1222,7 @@ function Overview({
         </div>
         <div>
           <div className="text-xs text-muted">Current proxy</div>
-          <div className="font-mono text-xs">{current?.ip || "—"}</div>
+          <div className="font-mono text-xs">{current?.ip || ""}</div>
         </div>
         <div>
           <div className="text-xs text-muted">Status</div>
@@ -1300,13 +1275,7 @@ function Overview({
         <Input name="displayName" defaultValue={machine.displayName || ""} />
       </Field>
       <Field label="Company">
-        <Select name="companyId" defaultValue={machine.companyId}>
-          {companies.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </Select>
+        <Input name="company" defaultValue={machine.company || ""} />
       </Field>
       <Field label="Lifecycle">
         <Select name="lifecycleStatus" defaultValue={machine.lifecycleStatus}>
