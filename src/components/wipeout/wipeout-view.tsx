@@ -11,7 +11,6 @@ import {
 import type {
   ClosureChecklist,
   ClosureChecklistItem,
-  Company,
   Machine,
   Server,
 } from "@prisma/client";
@@ -34,7 +33,6 @@ import type { MissingWipeoutTask } from "@/lib/services/wipeout";
 
 type Row = Machine & {
   server: Server;
-  company: Company;
   closure: (ClosureChecklist & { items: ClosureChecklistItem[] }) | null;
 };
 
@@ -263,7 +261,7 @@ export function WipeoutView({
                         </div>
                       ) : null}
                     </td>
-                    <td className="px-4 py-3">{r.company.name}</td>
+                    <td className="px-4 py-3">{r.company?.trim() || ""}</td>
                     <td className="px-4 py-3">{r.server.name}</td>
                     <td className="px-4 py-3">
                       {r.closure
@@ -304,7 +302,7 @@ export function WipeoutView({
         }
         subtitle={
           selected
-            ? [selected.displayName, selected.company.name]
+            ? [selected.displayName, selected.company?.trim() || null]
                 .filter(Boolean)
                 .join(" · ")
             : undefined

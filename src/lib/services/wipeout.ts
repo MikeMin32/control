@@ -601,7 +601,6 @@ export async function listWipeoutQueue() {
     },
     include: {
       server: true,
-      company: true,
       closure: { include: { items: true } },
     },
     orderBy: { updatedAt: "desc" },
@@ -617,7 +616,7 @@ export async function listArchive(params?: { q?: string }) {
         ? {
             OR: [
               { displayName: { contains: q, mode: "insensitive" } },
-              { company: { name: { contains: q, mode: "insensitive" } } },
+              { company: { contains: q, mode: "insensitive" } },
               ...(Number.isFinite(Number.parseInt(q, 10))
                 ? [{ vmid: Number.parseInt(q, 10) }]
                 : []),
@@ -627,7 +626,6 @@ export async function listArchive(params?: { q?: string }) {
     },
     include: {
       server: true,
-      company: true,
       closure: { include: { items: true, completedBy: true } },
       proxyAssignments: {
         include: { proxy: true },

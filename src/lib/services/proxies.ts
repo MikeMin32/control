@@ -35,7 +35,7 @@ export async function listProxies(params?: {
       purchaseSourceDolphin: true,
       assignments: {
         where: { endedAt: null },
-        include: { machine: { include: { server: true, company: true } } },
+        include: { machine: { include: { server: true } } },
         take: 1,
       },
       dolphinAssignments: {
@@ -192,7 +192,7 @@ export async function findIpHistory(ip: string, excludeMachineId?: string) {
       ...(excludeMachineId ? { machineId: { not: excludeMachineId } } : {}),
     },
     include: {
-      machine: { include: { server: true, company: true } },
+      machine: { include: { server: true } },
       proxy: true,
     },
     orderBy: { startedAt: "desc" },

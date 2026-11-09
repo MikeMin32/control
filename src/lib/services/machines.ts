@@ -2,6 +2,8 @@ import {
   ChecklistItemStatus,
   ChecklistTemplateKind,
   LifecycleStatus,
+  ProxyAvailability,
+  ProxyKind,
   type Prisma,
 } from "@prisma/client";
 import { prisma } from "../db";
@@ -44,7 +46,7 @@ export async function listMachines(params: MachineListParams) {
     const asInt = Number.parseInt(q, 10);
     where.OR = [
       { displayName: { contains: q, mode: "insensitive" } },
-      { company: { name: { contains: q, mode: "insensitive" } } },
+      { company: { contains: q, mode: "insensitive" } },
       { internalIp: { contains: q, mode: "insensitive" } },
       { country: { equals: q.toUpperCase(), mode: "insensitive" } },
       {
@@ -63,7 +65,7 @@ export async function listMachines(params: MachineListParams) {
   const order = params.order ?? "asc";
   switch (params.sort) {
     case "company":
-      orderBy.push({ company: { name: order } });
+      orderBy.push({ company: order });
       break;
     case "status":
       orderBy.push({ lifecycleStatus: order });
@@ -84,7 +86,6 @@ export async function listMachines(params: MachineListParams) {
       where,
       include: {
         server: true,
-        company: true,
         proxyAssignments: {
           where: { endedAt: null },
           include: { proxy: true },
@@ -107,7 +108,6 @@ export async function getMachine(id: string) {
     where: { id },
     include: {
       server: true,
-      company: true,
       proxyAssignments: {
         include: { proxy: true },
         orderBy: { startedAt: "desc" },
@@ -167,12 +167,14 @@ export async function createMachine(
     vmid: number;
     displayName?: string;
     serverId: string;
-    companyId: string;
+    company?: string | null;
     lifecycleStatus?: LifecycleStatus;
     internalIp?: string;
     country?: string | null;
     os?: string;
     notes?: string;
+    /** Optional VM-kind proxy to assign on create. Empty/omitted → no assignment. */
+    proxyId?: string | null;
   },
   actorId: string,
 ) {
@@ -202,9 +204,9 @@ export async function createMachine(
   if (!input.serverId?.trim()) {
     throw new AppError("Server is required");
   }
-  if (!input.companyId?.trim()) {
-    throw new AppError("Company is required");
-  }
+
+  const company = input.company?.trim() || null;
+  const proxyId = input.proxyId?.trim() || null;
 
   // Setup checklist only for Preparing — Active/Burned skip fabricated completion
   if (requested === LifecycleStatus.PREPARING) {
@@ -220,7 +222,7 @@ export async function createMachine(
           vmid: input.vmid,
           displayName: input.displayName?.trim() || null,
           serverId: input.serverId,
-          companyId: input.companyId,
+          company,
           lifecycleStatus: requested,
           internalIp: input.internalIp?.trim() || null,
           country,
@@ -249,6 +251,10 @@ export async function createMachine(
       type: "machine.created",
       message: `Created VM ${machine.vmid} (${requested})`,
     });
+
+    if (proxyId) {
+      await assignVmProxyOnCreate(tx, machine.id, proxyId, actorId);
+    }
 
     if (requested === LifecycleStatus.PREPARING) {
       const template = await tx.checklistTemplate.findFirst({
@@ -290,11 +296,100 @@ export async function createMachine(
   });
 }
 
+/** Initial VM-proxy assignment (same rules as rotateProxy; purchase-source Dolphin untouched). */
+async function assignVmProxyOnCreate(
+  tx: Prisma.TransactionClient,
+  machineId: string,
+  proxyId: string,
+  actorId: string,
+) {
+  const proxy = await tx.proxy.findUnique({
+    where: { id: proxyId },
+    include: { assignments: { where: { endedAt: null } } },
+  });
+  if (!proxy) throw new AppError("Proxy not found", "NOT_FOUND", 404);
+  if (proxy.kind !== ProxyKind.VM) {
+    throw new AppError(
+      "Only VM proxies can be assigned to machines",
+      "WRONG_PROXY_KIND",
+    );
+  }
+  if (proxy.availability === ProxyAvailability.RETIRED) {
+    throw new AppError("Cannot assign a retired proxy", "PROXY_RETIRED");
+  }
+  if (proxy.assignments.length > 0) {
+    throw new AppError(
+      "Proxy is already assigned to another VM",
+      "PROXY_IN_USE",
+      409,
+    );
+  }
+
+  const claimed = await tx.proxy.updateMany({
+    where: {
+      id: proxyId,
+      availability: ProxyAvailability.AVAILABLE,
+    },
+    data: { availability: ProxyAvailability.ASSIGNED },
+  });
+  if (claimed.count !== 1) {
+    throw new AppError("Proxy could not be claimed", "PROXY_CLAIM_FAILED", 409);
+  }
+
+  const stillOpen = await tx.proxyAssignment.count({
+    where: { proxyId, endedAt: null },
+  });
+  if (stillOpen > 0) {
+    throw new AppError(
+      "Proxy is already assigned to another VM",
+      "PROXY_IN_USE",
+      409,
+    );
+  }
+
+  let assignment;
+  try {
+    assignment = await tx.proxyAssignment.create({
+      data: {
+        machineId,
+        proxyId,
+        reason: "Initial assignment",
+        actorId,
+      },
+    });
+  } catch (err) {
+    const code =
+      err && typeof err === "object" && "code" in err
+        ? String((err as { code?: string }).code)
+        : "";
+    if (code === "P2002") {
+      throw new AppError(
+        "Concurrent proxy assignment conflict",
+        "PROXY_CONFLICT",
+        409,
+      );
+    }
+    throw err;
+  }
+
+  await logActivity(tx, {
+    machineId,
+    actorId,
+    type: "proxy.rotated",
+    message: `Assigned proxy ${proxy.ip}`,
+    metadata: {
+      proxyId: proxy.id,
+      assignmentId: assignment.id,
+      reason: "Initial assignment",
+    },
+  });
+}
+
 export async function updateMachine(
   id: string,
   input: {
     displayName?: string | null;
-    companyId?: string;
+    company?: string | null;
     lifecycleStatus?: LifecycleStatus;
     internalIp?: string | null;
     country?: string | null;
@@ -354,7 +449,10 @@ export async function updateMachine(
           input.displayName === undefined
             ? undefined
             : input.displayName?.trim() || null,
-        companyId: input.companyId,
+        company:
+          input.company === undefined
+            ? undefined
+            : input.company?.trim() || null,
         lifecycleStatus: input.lifecycleStatus,
         internalIp:
           input.internalIp === undefined

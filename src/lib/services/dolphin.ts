@@ -37,18 +37,18 @@ async function assertMachineExists(
   if (!machine) throw new AppError("Linked VM not found", "NOT_FOUND", 404);
 }
 
-/** Plain-text linked VM label for selectors: `101 · Company`. */
+/** Plain-text linked VM label for selectors: `101 · Company` (or just VMID). */
 export function linkedVmOptionLabel(m: {
   vmid: number;
-  company?: { name: string } | null;
+  company?: string | null;
 }): string {
-  const company = m.company?.name?.trim() || "No company";
-  return `${m.vmid} · ${company}`;
+  const company = m.company?.trim();
+  return company ? `${m.vmid} · ${company}` : String(m.vmid);
 }
 
 export async function listLinkableMachines() {
   return prisma.machine.findMany({
-    include: { server: true, company: true },
+    include: { server: true },
     orderBy: [{ vmid: "asc" }, { displayName: "asc" }],
   });
 }
@@ -80,7 +80,7 @@ export async function listDolphinAccounts(params?: {
         {
           machine: {
             OR: [
-              { company: { name: { contains: q, mode: "insensitive" } } },
+              { company: { contains: q, mode: "insensitive" } },
               { displayName: { contains: q, mode: "insensitive" } },
               ...(Number.isFinite(Number.parseInt(q, 10))
                 ? [{ vmid: Number.parseInt(q, 10) }]
@@ -98,7 +98,7 @@ export async function listDolphinAccounts(params?: {
     where,
     include: {
       machine: {
-        include: { server: true, company: true },
+        include: { server: true },
       },
       proxyAssignments: {
         where: { endedAt: null },
@@ -120,7 +120,7 @@ export async function getDolphinAccount(id: string) {
   const row = await prisma.dolphinAccount.findUnique({
     where: { id },
     include: {
-      machine: { include: { server: true, company: true } },
+      machine: { include: { server: true } },
       proxyAssignments: {
         where: { endedAt: null },
         include: { proxy: true },

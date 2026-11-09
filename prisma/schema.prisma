@@ -108,12 +108,11 @@ model Server {
 }
 
 model Company {
-  id        String    @id @default(uuid()) @db.Uuid
-  name      String    @unique
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
   notes     String?
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  machines  Machine[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Machine {
@@ -121,7 +120,8 @@ model Machine {
   vmid            Int
   displayName     String?
   serverId        String          @db.Uuid
-  companyId       String          @db.Uuid
+  /// Per-VM plain-text label (not a shared Company entity). No uniqueness.
+  company         String?
   lifecycleStatus LifecycleStatus @default(PREPARING)
   internalIp      String?
   country         String?         // ISO 3166-1 alpha-2, optional
@@ -131,17 +131,15 @@ model Machine {
   updatedAt       DateTime        @updatedAt
   archivedAt      DateTime?
 
-  server          Server          @relation(fields: [serverId], references: [id])
-  company         Company         @relation(fields: [companyId], references: [id])
+  server           Server             @relation(fields: [serverId], references: [id])
   proxyAssignments ProxyAssignment[]
-  migrations      MachineMigration[]
-  closure         ClosureChecklist?
-  setupChecklist  SetupChecklist?
-  dolphinAccounts DolphinAccount[]
-  activities      ActivityEvent[]
+  migrations       MachineMigration[]
+  closure          ClosureChecklist?
+  setupChecklist   SetupChecklist?
+  dolphinAccounts  DolphinAccount[]
+  activities       ActivityEvent[]
 
   @@index([serverId])
-  @@index([companyId])
   @@index([lifecycleStatus])
   @@index([vmid])
 }

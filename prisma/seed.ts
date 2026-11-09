@@ -171,7 +171,7 @@ async function main() {
     data: {
       vmid: number;
       serverId: string;
-      companyId: string;
+      company?: string | null;
       displayName: string;
       lifecycleStatus: LifecycleStatus;
       archivedAt?: Date | null;
@@ -199,7 +199,7 @@ async function main() {
   const mActive = await ensureMachine("active-101", {
     vmid: 101,
     serverId: s1.id,
-    companyId: cAlpha.id,
+    company: cAlpha.name,
     displayName: "web-alpha",
     lifecycleStatus: LifecycleStatus.ACTIVE,
     internalIp: "192.168.201.10",
@@ -208,7 +208,7 @@ async function main() {
   const mPrep = await ensureMachine("prep-110", {
     vmid: 110,
     serverId: s1.id,
-    companyId: cBeta.id,
+    company: cBeta.name,
     displayName: "staging-beta",
     lifecycleStatus: LifecycleStatus.PREPARING,
     internalIp: "192.168.201.20",
@@ -217,7 +217,7 @@ async function main() {
   const mShop = await ensureMachine("shop-220", {
     vmid: 220,
     serverId: s2.id,
-    companyId: cGamma.id,
+    company: cGamma.name,
     displayName: "shop-gamma",
     lifecycleStatus: LifecycleStatus.BURNED,
     country: "GB",
@@ -225,14 +225,14 @@ async function main() {
   const mBurned = await ensureMachine("burned-305", {
     vmid: 305,
     serverId: s2.id,
-    companyId: cAlpha.id,
+    company: cAlpha.name,
     displayName: "ops-burn",
     lifecycleStatus: LifecycleStatus.BURNED,
   });
   const mArchived = await ensureMachine("archived-401", {
     vmid: 401,
     serverId: s1.id,
-    companyId: cBeta.id,
+    company: cBeta.name,
     displayName: "legacy-closed",
     lifecycleStatus: LifecycleStatus.ARCHIVED,
     archivedAt: new Date("2025-11-01T12:00:00Z"),

@@ -11,7 +11,6 @@ import type {
   ProxyAssignment,
   Machine,
   Server,
-  Company,
 } from "@prisma/client";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -36,7 +35,7 @@ type ProxyTab = "vm" | "dolphin";
 type Row = Proxy & {
   purchaseSourceDolphin: DolphinAccount | null;
   assignments: (ProxyAssignment & {
-    machine: Machine & { server: Server; company: Company };
+    machine: Machine & { server: Server };
   })[];
   dolphinAssignments: (DolphinProxyAssignment & {
     dolphin: DolphinAccount;
@@ -228,7 +227,9 @@ export function ProxiesView({
                         </td>
                         <td className="px-4 py-3">
                           {machineAssign
-                            ? `${machineAssign.machine.vmid} · ${machineAssign.machine.company.name}`
+                            ? machineAssign.machine.company?.trim()
+                              ? `${machineAssign.machine.vmid} · ${machineAssign.machine.company.trim()}`
+                              : String(machineAssign.machine.vmid)
                             : "—"}
                         </td>
                       </>
