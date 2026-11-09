@@ -149,7 +149,7 @@ export function SettingsView({
           ))}
         </ul>
         <form
-          className="flex gap-2"
+          className="flex flex-wrap items-end gap-2"
           onSubmit={(e) => {
             e.preventDefault();
             const fd = new FormData(e.currentTarget);
@@ -166,7 +166,9 @@ export function SettingsView({
             });
           }}
         >
-          <Input name="name" placeholder="Server name" required />
+          <Field label="Server name" className="min-w-[200px] flex-1">
+            <Input name="name" required />
+          </Field>
           <Button type="submit" variant="outline" disabled={pending}>
             Add
           </Button>
@@ -185,7 +187,7 @@ export function SettingsView({
           ))}
         </ul>
         <form
-          className="flex gap-2"
+          className="flex flex-wrap items-end gap-2"
           onSubmit={(e) => {
             e.preventDefault();
             const fd = new FormData(e.currentTarget);
@@ -199,7 +201,9 @@ export function SettingsView({
             });
           }}
         >
-          <Input name="name" placeholder="Company name" required />
+          <Field label="Company name" className="min-w-[200px] flex-1">
+            <Input name="name" required />
+          </Field>
           <Button type="submit" variant="outline" disabled={pending}>
             Add
           </Button>
@@ -224,7 +228,7 @@ export function SettingsView({
               setItems([
                 ...items,
                 {
-                  label: "New item",
+                  label: "",
                   required: true,
                   sortOrder: items.length,
                   description: "",
@@ -274,10 +278,10 @@ export function SettingsView({
               setSetupItems([
                 ...setupItems,
                 {
-                  label: "New item",
+                  label: "",
                   required: true,
                   sortOrder: setupItems.length,
-                  section: "VM",
+                  section: "",
                   description: "",
                 },
               ])
@@ -374,13 +378,15 @@ function TemplateItemsEditor({
             {showSection ? (
               <Select
                 className="w-36"
-                value={item.section || "VM"}
+                value={item.section || ""}
+                aria-label="Section"
                 onChange={(e) => {
                   const next = [...items];
                   next[idx] = { ...item, section: e.target.value };
                   setItems(next);
                 }}
               >
+                <option value="" />
                 {SETUP_SECTIONS.map((s) => (
                   <option key={s} value={s}>
                     {s}
@@ -391,6 +397,7 @@ function TemplateItemsEditor({
             <Input
               className="min-w-[180px] flex-1"
               value={item.label}
+              aria-label="Item label"
               onChange={(e) => {
                 const next = [...items];
                 next[idx] = { ...item, label: e.target.value };
@@ -419,8 +426,8 @@ function TemplateItemsEditor({
           </div>
           {showDescription ? (
             <Input
-              placeholder="Optional description"
               value={item.description || ""}
+              aria-label="Description"
               onChange={(e) => {
                 const next = [...items];
                 next[idx] = { ...item, description: e.target.value };

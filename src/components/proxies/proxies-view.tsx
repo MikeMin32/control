@@ -230,7 +230,7 @@ export function ProxiesView({
         >
           <div className="grid grid-cols-2 gap-3">
             <Field label="IP">
-              <Input name="ip" required placeholder="192.0.2.10" />
+              <Input name="ip" required />
             </Field>
             <Field label="Provider">
               <Input name="provider" required />

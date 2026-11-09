@@ -391,7 +391,7 @@ export function MachinesView({
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <Input
             className="pl-9"
-            placeholder="Search VMID, name, company, internal IP, country, proxy"
+            aria-label="Search machines"
             defaultValue={initialQ}
             onKeyDown={(e) => {
               if (e.key === "Enter") {
@@ -711,14 +711,21 @@ export function MachinesView({
                 }
                 companyId = created.id!;
               }
+              if (!companyId) {
+                setError("Company is required");
+                return;
+              }
+              const status = String(fd.get("lifecycleStatus") || "");
+              if (!status) {
+                setError("Status is required");
+                return;
+              }
               const res = await createMachineAction({
                 vmid: Number(fd.get("vmid")),
                 displayName: String(fd.get("displayName") || "") || undefined,
                 serverId: String(fd.get("serverId")),
                 companyId,
-                lifecycleStatus: String(
-                  fd.get("lifecycleStatus"),
-                ) as LifecycleStatus,
+                lifecycleStatus: status as LifecycleStatus,
                 internalIp: String(fd.get("internalIp") || "") || undefined,
                 country: String(fd.get("country") || "") || null,
                 os: String(fd.get("os") || "") || undefined,
@@ -731,7 +738,7 @@ export function MachinesView({
               setAddOpen(false);
               router.refresh();
               if (res.id) {
-                const status = String(fd.get("lifecycleStatus") || "PREPARING");
+                const status = String(fd.get("lifecycleStatus") || "");
                 openMachine(
                   res.id,
                   status === "PREPARING" ? "setup" : "overview",
@@ -749,11 +756,8 @@ export function MachinesView({
             </Field>
           </div>
           <Field label="Server">
-            <Select
-              name="serverId"
-              required
-              defaultValue={initialServerId || activeServers[0]?.id}
-            >
+            <Select name="serverId" required defaultValue="">
+              <option value="" />
               {activeServers.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -762,7 +766,8 @@ export function MachinesView({
             </Select>
           </Field>
           <Field label="Company">
-            <Select name="companyId" defaultValue={companies[0]?.id}>
+            <Select name="companyId" defaultValue="">
+              <option value="" />
               {companies.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -771,10 +776,11 @@ export function MachinesView({
             </Select>
           </Field>
           <Field label="Or create company">
-            <Input name="newCompany" placeholder="New company name" />
+            <Input name="newCompany" />
           </Field>
           <Field label="Status">
-            <Select name="lifecycleStatus" defaultValue="PREPARING">
+            <Select name="lifecycleStatus" required defaultValue="">
+              <option value="" />
               {LIFECYCLE_CREATE_STATUSES.map((k) => (
                 <option key={k} value={k}>
                   {LIFECYCLE_LABELS[k]}
@@ -790,7 +796,7 @@ export function MachinesView({
           </Field>
           <div className="grid grid-cols-2 gap-3">
             <Field label="Internal IP">
-              <Input name="internalIp" placeholder="192.168.201.10" />
+              <Input name="internalIp" />
             </Field>
             <Field label="OS">
               <Input name="os" />
@@ -878,7 +884,8 @@ export function MachinesView({
               />
             </Field>
             <Field label="New proxy">
-              <Select name="proxyId" required>
+              <Select name="proxyId" required defaultValue="">
+                <option value="" />
                 {availableProxies.map((p) => (
                   <option key={p.id} value={p.id}>
                     {p.ip} · {p.provider}
@@ -887,11 +894,7 @@ export function MachinesView({
               </Select>
             </Field>
             <Field label="Reason">
-              <Input
-                name="reason"
-                required
-                placeholder="Replacement reason"
-              />
+              <Input name="reason" required />
             </Field>
             {error && rotateOpen ? (
               <p className="text-sm text-rose-700" role="alert">
@@ -1078,11 +1081,8 @@ export function MachinesView({
                 }}
               >
                 <Field label="Target server">
-                  <Select
-                    name="toServerId"
-                    required
-                    defaultValue={selected.serverId}
-                  >
+                  <Select name="toServerId" required defaultValue="">
+                    <option value="" />
                     {activeServers.map((s) => (
                       <option key={s.id} value={s.id}>
                         {s.name}
@@ -1091,13 +1091,7 @@ export function MachinesView({
                   </Select>
                 </Field>
                 <Field label="Target VMID">
-                  <Input
-                    name="toVmid"
-                    type="number"
-                    required
-                    min={1}
-                    defaultValue={selected.vmid}
-                  />
+                  <Input name="toVmid" type="number" required min={1} />
                 </Field>
                 <Field label="Note">
                   <Input name="note" />

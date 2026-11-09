@@ -64,7 +64,7 @@ export function ArchiveView({
 
       <Input
         defaultValue={q}
-        placeholder="Search archived VMs"
+        aria-label="Search archived VMs"
         className="max-w-sm"
         onKeyDown={(e) => {
           if (e.key === "Enter") {

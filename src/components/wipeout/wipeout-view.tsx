@@ -577,7 +577,7 @@ export function WipeoutView({
                 >
                   <Input
                     name="label"
-                    placeholder="Custom item"
+                    aria-label="Custom item label"
                     className="min-w-[160px] flex-1"
                   />
                   <label className="flex items-center gap-1 text-xs text-muted">
@@ -638,7 +638,6 @@ export function WipeoutView({
             rows={3}
             value={noteDraft}
             onChange={(e) => setNoteDraft(e.target.value)}
-            placeholder="Optional context for this step"
           />
         </Field>
       </Dialog>
@@ -676,7 +675,6 @@ export function WipeoutView({
             rows={3}
             value={naDraft}
             onChange={(e) => setNaDraft(e.target.value)}
-            placeholder="Why this step does not apply"
             required
           />
         </Field>
@@ -796,7 +794,6 @@ export function WipeoutView({
               rows={2}
               value={overrideNote}
               onChange={(e) => setOverrideNote(e.target.value)}
-              placeholder="Why completing early"
             />
           </Field>
         </div>

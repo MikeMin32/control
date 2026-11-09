@@ -484,7 +484,6 @@ export function SetupChecklistPanel({
               rows={2}
               value={overrideNote}
               onChange={(e) => setOverrideNote(e.target.value)}
-              placeholder="Why completing early"
             />
           </Field>
         </div>

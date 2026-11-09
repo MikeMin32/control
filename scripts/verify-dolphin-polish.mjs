@@ -138,7 +138,7 @@ try {
     JSON.stringify(walletCol.map((r) => r.network)),
   );
 
-  // Add form: default network TRC20, selector uses company
+  // Add form: empty defaults, selector uses company
   await page.evaluate(() => {
     const btn = Array.from(document.querySelectorAll("button")).find((b) =>
       b.textContent.includes("Add account"),
@@ -152,15 +152,15 @@ try {
       document.querySelectorAll('#add-dolphin-form select[name="machineId"] option'),
     ).map((o) => o.textContent.trim());
     return {
-      networkDefault: net?.value,
+      networkDefault: net?.value ?? null,
       hasCompanyOption: opts.some((t) => /^\d+\s*·\s+/.test(t) && !/web-alpha|staging/.test(t)),
       sampleOptions: opts.slice(0, 4),
     };
   });
   ok(
-    "new account network defaults to TRC20",
-    formBits.networkDefault === "TRC20",
-    formBits.networkDefault,
+    "new account network starts empty",
+    formBits.networkDefault === "",
+    JSON.stringify(formBits.networkDefault),
   );
   ok(
     "VM selector uses VMID · company (not display name)",

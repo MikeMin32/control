@@ -25,9 +25,7 @@ export function CountrySelect({
   const selected = controlled ? value || "" : internal;
 
   const options = useMemo(() => filterCountries(query), [query]);
-  const selectedLabel =
-    COUNTRIES.find((c) => c.code === selected)?.name ??
-    (selected ? selected : "No country");
+  const selectedLabel = COUNTRIES.find((c) => c.code === selected)?.name;
 
   function choose(code: string | null) {
     if (!controlled) setInternal(code ?? "");
@@ -50,10 +48,17 @@ export function CountrySelect({
         )}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-label={
+          selected
+            ? `Country ${selected}${selectedLabel ? ` ${selectedLabel}` : ""}`
+            : "Country"
+        }
         onClick={() => setOpen((o) => !o)}
       >
         <span className={selected ? "text-ink" : "text-muted"}>
-          {selected ? `${selected} · ${selectedLabel}` : "No country"}
+          {selected
+            ? `${selected}${selectedLabel ? ` · ${selectedLabel}` : ""}`
+            : "\u00A0"}
         </span>
         <span className="text-xs text-muted">▾</span>
       </button>
@@ -62,7 +67,6 @@ export function CountrySelect({
           <div className="border-b border-line p-2">
             <Input
               autoFocus
-              placeholder="Search country…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               aria-label="Search countries"
@@ -80,7 +84,7 @@ export function CountrySelect({
                 className="block w-full px-3 py-2 text-left text-muted hover:bg-sidebar"
                 onClick={() => choose(null)}
               >
-                No country
+                {"\u00A0"}
               </button>
             </li>
             {options.map((c) => (

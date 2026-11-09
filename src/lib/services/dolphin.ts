@@ -3,8 +3,6 @@ import { prisma } from "../db";
 import { AppError } from "../errors";
 import { logActivity } from "../activity";
 
-export const DEFAULT_DOLPHIN_NETWORK = "TRC20";
-
 export type DolphinInput = {
   accountName: string;
   machineId?: string | null;
@@ -16,19 +14,15 @@ export type DolphinInput = {
   notes?: string | null;
 };
 
-function normalizeInput(input: DolphinInput, opts?: { isCreate?: boolean }) {
+function normalizeInput(input: DolphinInput) {
   const accountName = input.accountName.trim();
   if (!accountName) throw new AppError("Account name is required");
-  let network = input.network?.trim() || null;
-  if (opts?.isCreate && !network) {
-    network = DEFAULT_DOLPHIN_NETWORK;
-  }
   return {
     accountName,
     machineId: input.machineId?.trim() || null,
     wallet: input.wallet?.trim() || null,
     walletAddress: input.walletAddress?.trim() || null,
-    network,
+    network: input.network?.trim() || null,
     notes: input.notes?.trim() || null,
   };
 }
@@ -108,7 +102,7 @@ export async function createDolphinAccount(
   input: DolphinInput,
   actorId: string,
 ) {
-  const data = normalizeInput(input, { isCreate: true });
+  const data = normalizeInput(input);
   return prisma.$transaction(async (tx) => {
     await assertMachineExists(tx, data.machineId);
     const row = await tx.dolphinAccount.create({ data });

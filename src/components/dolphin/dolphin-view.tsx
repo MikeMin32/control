@@ -30,10 +30,7 @@ import {
   LIFECYCLE_LABELS,
   LIFECYCLE_PILL,
 } from "@/lib/labels";
-import {
-  DEFAULT_DOLPHIN_NETWORK,
-  linkedVmOptionLabel,
-} from "@/lib/services/dolphin";
+import { linkedVmOptionLabel } from "@/lib/services/dolphin";
 
 type MachineOption = Machine & { server: Server; company: Company };
 
@@ -127,7 +124,7 @@ export function DolphinView({
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
         <Input
           className="pl-9"
-          placeholder="Search account, VMID, company, wallet, or address"
+          aria-label="Search Dolphin accounts"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
@@ -370,7 +367,6 @@ function AccountFormDialog({
   }) => void;
 }) {
   const formId = initial ? "edit-dolphin-form" : "add-dolphin-form";
-  const isCreate = !initial;
   return (
     <Dialog
       open={open}
@@ -422,7 +418,7 @@ function AccountFormDialog({
             defaultValue={initial?.machineId || ""}
             key={initial?.id || "new-vm"}
           >
-            <option value="">None</option>
+            <option value="" />
             {machines.map((m) => (
               <option key={m.id} value={m.id}>
                 {linkedVmOptionLabel(m)}
@@ -433,7 +429,6 @@ function AccountFormDialog({
         <Field label="Wallet">
           <Input
             name="wallet"
-            placeholder="Optional label"
             defaultValue={initial?.wallet || ""}
             key={initial?.id || "new-wallet-label"}
           />
@@ -441,7 +436,6 @@ function AccountFormDialog({
         <Field label="Address">
           <Input
             name="walletAddress"
-            placeholder="Public wallet address"
             defaultValue={initial?.walletAddress || ""}
             key={initial?.id || "new-address"}
           />
@@ -449,12 +443,7 @@ function AccountFormDialog({
         <Field label="Network">
           <Input
             name="network"
-            placeholder={DEFAULT_DOLPHIN_NETWORK}
-            defaultValue={
-              isCreate
-                ? DEFAULT_DOLPHIN_NETWORK
-                : initial?.network || ""
-            }
+            defaultValue={initial?.network || ""}
             key={initial?.id || "new-net"}
           />
         </Field>

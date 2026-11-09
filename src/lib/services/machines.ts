@@ -184,8 +184,10 @@ export async function createMachine(
     throw new AppError("Country must be a valid ISO 3166-1 alpha-2 code");
   }
 
-  const requested =
-    input.lifecycleStatus ?? LifecycleStatus.PREPARING;
+  if (!input.lifecycleStatus) {
+    throw new AppError("Status is required", "INVALID_STATUS");
+  }
+  const requested = input.lifecycleStatus;
   const allowedCreate: LifecycleStatus[] = [
     LifecycleStatus.PREPARING,
     LifecycleStatus.ACTIVE,
@@ -196,6 +198,12 @@ export async function createMachine(
       "New VMs may only be Preparing, Active, or Burned",
       "INVALID_STATUS",
     );
+  }
+  if (!input.serverId?.trim()) {
+    throw new AppError("Server is required");
+  }
+  if (!input.companyId?.trim()) {
+    throw new AppError("Company is required");
   }
 
   // Setup checklist only for Preparing — Active/Burned skip fabricated completion
