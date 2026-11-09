@@ -10,7 +10,21 @@ import { prisma } from "../db";
 import { AppError } from "../errors";
 import { logActivity } from "../activity";
 import { normalizeCountryCode } from "../countries";
+import { normalizeOptionalIpv4 } from "../internal-ip";
 import { ensureDefaultSetupTemplate } from "./setup";
+
+function parseInternalIpInput(
+  value: string | null | undefined,
+): string | null {
+  try {
+    return normalizeOptionalIpv4(value);
+  } catch {
+    throw new AppError(
+      "Internal IP must be a valid IPv4 address",
+      "INVALID_IPV4",
+    );
+  }
+}
 
 export type MachineListParams = {
   serverId?: string | null;
@@ -207,6 +221,7 @@ export async function createMachine(
 
   const company = input.company?.trim() || null;
   const proxyId = input.proxyId?.trim() || null;
+  const internalIp = parseInternalIpInput(input.internalIp);
 
   // Setup checklist only for Preparing — Active/Burned skip fabricated completion
   if (requested === LifecycleStatus.PREPARING) {
@@ -224,7 +239,7 @@ export async function createMachine(
           serverId: input.serverId,
           company,
           lifecycleStatus: requested,
-          internalIp: input.internalIp?.trim() || null,
+          internalIp,
           country,
           os: input.os?.trim() || null,
           notes: input.notes?.trim() || null,
@@ -442,6 +457,11 @@ export async function updateMachine(
       }
     }
 
+    const internalIp =
+      input.internalIp === undefined
+        ? undefined
+        : parseInternalIpInput(input.internalIp);
+
     const machine = await tx.machine.update({
       where: { id },
       data: {
@@ -454,10 +474,7 @@ export async function updateMachine(
             ? undefined
             : input.company?.trim() || null,
         lifecycleStatus: input.lifecycleStatus,
-        internalIp:
-          input.internalIp === undefined
-            ? undefined
-            : input.internalIp?.trim() || null,
+        internalIp,
         country,
         os: input.os === undefined ? undefined : input.os?.trim() || null,
         notes:

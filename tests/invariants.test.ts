@@ -207,6 +207,58 @@ describe("VM Control business invariants", () => {
     expect(row?.purchaseSourceDolphinId).toBe(src.id);
   });
 
+  it("1d. Internal IP optional; IPv4 validated; suggested-style and manual IPs persist", async () => {
+    const { createMachine, getMachine, updateMachine } = await import(
+      "../src/lib/services/machines"
+    );
+    const actor = await user();
+    const server = await prisma.server.create({ data: { name: "1tech2" } });
+
+    const suggested = await createMachine(
+      {
+        vmid: 120,
+        serverId: server.id,
+        lifecycleStatus: LifecycleStatus.ACTIVE,
+        internalIp: "192.168.120.10",
+      },
+      actor.id,
+    );
+    expect((await getMachine(suggested.id)).internalIp).toBe("192.168.120.10");
+
+    const high = await createMachine(
+      {
+        vmid: 777,
+        serverId: server.id,
+        lifecycleStatus: LifecycleStatus.ACTIVE,
+        internalIp: "192.168.250.10",
+      },
+      actor.id,
+    );
+    expect((await getMachine(high.id)).internalIp).toBe("192.168.250.10");
+
+    await expect(
+      createMachine(
+        {
+          vmid: 121,
+          serverId: server.id,
+          lifecycleStatus: LifecycleStatus.ACTIVE,
+          internalIp: "not-an-ip",
+        },
+        actor.id,
+      ),
+    ).rejects.toMatchObject({ code: "INVALID_IPV4" });
+
+    await updateMachine(
+      high.id,
+      { internalIp: "10.1.2.3" },
+      actor.id,
+    );
+    expect((await getMachine(high.id)).internalIp).toBe("10.1.2.3");
+
+    await updateMachine(high.id, { internalIp: "" }, actor.id);
+    expect((await getMachine(high.id)).internalIp).toBeNull();
+  });
+
   it("1b. search includes internal IP; country optional and unset by default", async () => {
     const { createMachine, listMachines, updateMachine } = await import(
       "../src/lib/services/machines"
