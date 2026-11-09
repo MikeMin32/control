@@ -65,8 +65,8 @@ try {
     ths.map((th) => th.textContent.trim()).filter(Boolean),
   );
   ok(
-    "VM tab has Purchase source column",
-    vmHeaders.includes("Purchase source") && vmHeaders.includes("Assigned to"),
+    "VM tab has Dolphin column",
+    vmHeaders.includes("Dolphin") && vmHeaders.includes("Assigned to"),
     vmHeaders.join(" | "),
   );
 

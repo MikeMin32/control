@@ -156,7 +156,7 @@ export function ProxiesView({
               <th className="px-4 py-3 font-medium">Billing</th>
               {tab === "vm" ? (
                 <>
-                  <th className="px-4 py-3 font-medium">Purchase source</th>
+                  <th className="px-4 py-3 font-medium">Dolphin</th>
                   <th className="px-4 py-3 font-medium">Assigned to</th>
                 </>
               ) : (
